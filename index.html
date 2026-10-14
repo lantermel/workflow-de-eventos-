@@ -2245,7 +2245,7 @@ teresa cristina - teresa.cristina@sirio.org.br"></textarea>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const VERSAO_FERRAMENTA = 'v163';
+const VERSAO_FERRAMENTA = 'v164';
 const VERSAO_DATA = '14/10/2026';
 /* ================= CONEXÃO COM O BACKEND (SUPABASE) =================
    Preencha as DUAS constantes abaixo com os dados do seu projeto:
@@ -2964,6 +2964,10 @@ function restritoPorSetor(){ return setoresDoUsuario().length > 0; }
 function podeVerEvento(s){
   const lim = setoresDoUsuario();
   if(!lim.length) return true;
+  // Evento que a própria pessoa abriu nunca desaparece para ela, mesmo que o
+  // setor tenha sido classificado de outra forma.
+  const meu = (s && (s.criadoPor || s.solicitante) || '') === (currentUserEmail || '');
+  if(meu && currentUserEmail) return true;
   return lim.indexOf(setorDoEvento(s)) >= 0;
 }
 /* Quando o usuario esta preso a um unico setor, o campo vem preenchido e
@@ -3450,8 +3454,56 @@ function abrirDetalheCardapio(id){
   document.getElementById('cardapio-detail-modal').classList.add('show');
 }
 
+/* Fichas cujo nome casa, por semelhança, com um insumo do cadastro. Nesses
+   casos o item lançado num evento com o nome do insumo é custeado como se
+   fosse a ficha inteira — "MINI PAO HOT DOG", o pão, custeado como
+   "MINI HOT DOG", o lanche. Não mexemos no custo automaticamente: avisamos. */
+function fichasQueColidem(){
+  const out = [];
+  INSUMOS.forEach(function(i){
+    const alvo = normNome(i.nome);
+    // Insumo que tem ficha com o mesmo nome não tem ambiguidade nenhuma.
+    if(FICHA_TECNICA.some(p=>normNome(p.nome) === alvo)) return;
+    const f = FICHA_TECNICA.find(p=>p.subtotal > 0 && mesmasPalavras(p.nome, i.nome));
+    if(!f) return;
+    const dela = f.porCrianca || f.subtotal || 0;
+    // Só é problema se esse for de fato o caminho que o custo toma.
+    if(Math.abs((custoProdutoRealizado(i.nome) || 0) - dela) > 0.005) return;
+    out.push({ ficha:f.nome, fichaCusto:dela,
+               insumo:i.nome, insumoCusto:(i.custo||0), insumoUn:(i.un||'') });
+  });
+  return out;
+}
+try{
+  const col = fichasQueColidem();
+  if(col.length) console.warn('Fichas que colidem com nome de insumo (' + col.length + '):',
+    col.map(c=>c.ficha + ' <-> ' + c.insumo).join(' | '));
+}catch(e){}
+
 function renderFichaTable(){
   document.getElementById('ficha-count').textContent = FICHA_TECNICA.length + ' produtos';
+  try{
+    const col = fichasQueColidem();
+    let av = document.getElementById('ficha-colisao');
+    const pai = document.getElementById('ficha-count');
+    if(!av && pai && pai.parentNode){
+      av = document.createElement('div');
+      av.id = 'ficha-colisao';
+      av.className = 'note';
+      av.style.cssText = 'background:#FFF8E1;border-left:4px solid var(--gold);margin:.6rem 0;';
+      pai.parentNode.insertBefore(av, pai.nextSibling);
+    }
+    if(av){
+      av.style.display = col.length ? '' : 'none';
+      if(col.length) av.innerHTML = '<strong>' + col.length +
+        ' ficha(s) com nome parecido com um insumo do cadastro.</strong> Quando um evento lança o item pelo nome do insumo, ' +
+        'o custo pode sair pela ficha inteira em vez do insumo: ' +
+        col.slice(0,5).map(c=>'<br>· ficha <strong>' + c.ficha + '</strong> (' + fmtBRL2(c.fichaCusto) +
+          ') × insumo <strong>' + c.insumo + '</strong> (' + fmtBRL2(c.insumoCusto) + ' por ' + c.insumoUn + ')').join('') +
+        (col.length>5 ? '<br>· … e mais ' + (col.length-5) : '') +
+        '<br><br>Renomear a ficha ou o insumo resolve. Enquanto convivem, confira o custo desses itens nos eventos.';
+    }
+  }catch(e){}
   const q = (document.getElementById('ficha-search').value || '').trim().toLowerCase();
   let filtered = FICHA_TECNICA;
   if(q){
@@ -5753,6 +5805,11 @@ document.getElementById('btn-enviar-solicitacao').addEventListener('click', asyn
   const record = {
     id: uid(),
     criadoEm: new Date().toLocaleString('pt-BR'),
+    // Quem abriu o evento. Sem isso, o sistema não sabia de quem era o aceite
+    // do orçamento e caía numa regra genérica.
+    criadoPor: currentUserEmail || '',
+    solicitante: currentUserEmail || '',
+    solicitanteNome: currentUserName || '',
     nome, data: document.getElementById('in-data').value,
     local: document.getElementById('in-local').value,
     horaIni: document.getElementById('in-hora-ini').value,
@@ -6666,9 +6723,28 @@ const ehOrcamento = s => ORC_STATUS.includes(s.status);
 const podePrecificar = () => hasRole('precificar')||hasRole('aprovador1')||hasRole('aprovador2')||hasRole('admin');
 /* Quem precifica não aceita o próprio orçamento: o aceite é do outro lado da
    mesa, e é dele que vem a força do documento. O administrador é exceção. */
+/* O aceite é de quem abriu o evento. Quando o evento não registra autor
+   (abertos antes desta versão), vale para o lado solicitante da mesa: quem tem
+   o perfil Orçamento e não precifica. O filtro de setor já limita quais
+   eventos essa pessoa alcança. */
 const souSolicitante = s => hasRole('admin') ||
   ((s.solicitante||s.criadoPor||'') === (currentUserEmail||'')) ||
-  (!s.solicitante && !s.criadoPor && hasRole('orcamento') && !podePrecificar());
+  (hasRole('orcamento') && !podePrecificar());
+
+/* Por que o botão de aceitar não aparece. Em vez de simplesmente não existir,
+   o cartão diz o que falta — foi isso que custou uma manhã de conferência. */
+function orcPorQueNaoAceita(s){
+  if(souSolicitante(s) && s.status === 'Aguardando solicitante') return '';
+  if(s.status !== 'Aguardando solicitante'){
+    if(podePrecificar())
+      return 'O aceite do solicitante aparece depois que você clicar em <strong>Enviar orçamento ao solicitante</strong>.';
+    return 'A equipe de A&amp;B ainda não enviou esta versão. O botão <strong>Aceitar orçamento</strong> aparece quando o orçamento for enviado a você.';
+  }
+  if(podePrecificar())
+    return 'Quem precifica não aceita o próprio orçamento — o aceite é do solicitante, e é dele que vem a força do documento.';
+  return 'Para aceitar, o seu usuário precisa do perfil <strong>Orçamento</strong> em Funcionários e acessos. ' +
+         'O perfil <strong>Responsável A&amp;B (Execução)</strong> não dá esse direito.';
+}
 
 function orcTotais(s){
   const mo = (s.previsto && s.previsto.rows ? s.previsto.rows : []).reduce((a,r)=>a+(r.custo||0),0);
@@ -6969,18 +7045,21 @@ function renderOrcamento(){
     if(souSolicitante(s) && s.status==='Aguardando solicitante')
       botoes += '<button class="btn sm gold" onclick="orcAceitar(\'' + s.id + '\')" style="margin-left:.4rem;">Aceitar orçamento</button>' +
                 '<button class="btn sm secondary" onclick="orcPedirAjuste(\'' + s.id + '\')" style="margin-left:.4rem;">Pedir ajuste</button>';
+    const porque = orcPorQueNaoAceita(s);
+    if(porque) botoes += '<div class="hint" style="text-transform:none;font-weight:normal;margin-top:.5rem;">' + porque + '</div>';
     if(ult) botoes += '<button class="btn sm secondary" onclick="orcImprimir(\'' + s.id + '\')" style="margin-left:.4rem;">Imprimir orçamento</button>';
     if(ult) botoes = '<div class="jul-folha-ctrl" style="margin:.6rem 0;">' +
       '<label>Enviar este orçamento por e-mail</label><div class="row3">' +
       '<div><input type="email" id="orc-mail-' + s.id + '" placeholder="e-mail do destinatário" value="' +
-         String((o.emailDestino || s.solicitante || '')).replace(/"/g,'&quot;') + '"></div>' +
+         String((o.emailDestino || s.solicitante || s.criadoPor || '')).replace(/"/g,'&quot;') + '"></div>' +
       '<div style="align-self:end;"><button class="btn sm gold" onclick="orcEnviarEmail(\'' + s.id + '\')">Abrir e-mail</button></div>' +
       '<div style="align-self:end;"><button class="btn sm secondary" onclick="orcCopiarEmail(\'' + s.id + '\')">Copiar texto</button></div>' +
       '</div><div class="hint" style="text-transform:none;font-weight:normal;">Abre o seu programa de e-mail com a mensagem pronta. ' +
       'Para enviar o orçamento formatado, use <strong>Imprimir orçamento</strong>, salve em PDF e anexe.</div></div>' + botoes;
     return '<div class="evento-item"><div class="evento-cab" style="cursor:default;">' +
       '<span class="evento-nome">' + (s.nome||'(sem nome)') + '</span>' +
-      '<span class="evento-quando">' + (fmtDataBR(s.data)||'sem data') + ' · ' + (s.convidados||0) + ' convidados · ' + (s.departamento||'') + '</span>' +
+      '<span class="evento-quando">' + (fmtDataBR(s.data)||'sem data') + ' · ' + (s.convidados||0) + ' convidados · ' + (s.departamento||'') +
+        (s.solicitanteNome || s.solicitante || s.criadoPor ? ' · aberto por ' + (s.solicitanteNome || s.solicitante || s.criadoPor) : '') + '</span>' +
       '<span class="evento-tags">' + statusBadge(s.status) +
         (setorDoEvento(s) ? ' <span class="badge">' + setorDoEvento(s) + '</span>' : '') +
         (o.versao?' <span class="badge">versão '+o.versao+'</span>':'') + '</span></div>' +
@@ -7262,6 +7341,7 @@ hist.length+' versão(ões) registrada(s) · documento emitido em '+new Date().t
 '<table><tr><td><strong>Evento</strong></td><td>'+esc(s.nome)+'</td><td><strong>Data</strong></td><td>'+(fmtDataBR(s.data)||'—')+'</td></tr>' +
 '<tr><td><strong>Local</strong></td><td>'+esc(s.local||'—')+'</td><td><strong>Horário</strong></td><td>'+esc(s.horaIni||'—')+' às '+esc(s.horaFim||'—')+'</td></tr>' +
 '<tr><td><strong>Convidados</strong></td><td>'+nm(s.convidados||0)+'</td><td><strong>Departamento</strong></td><td>'+esc(s.departamento||'—')+'</td></tr>' +
+'<tr><td><strong>Solicitante</strong></td><td colspan="3">'+esc(s.solicitanteNome || s.solicitante || s.criadoPor || '—')+'</td></tr>' +
 '<tr><td><strong>Setor do evento</strong></td><td>'+esc(setorDoEvento(s)||'—')+'</td><td><strong>Objetivo</strong></td><td>'+
 (s.modoReceita==='custo'?'Sem receita — repasse pelo custo':'Com receita')+'</td></tr>' +
 '<tr><td><strong>Tipo de serviço</strong></td><td>'+esc(s.tipoServico||'—')+'</td><td><strong>Situação</strong></td><td>'+esc(s.status||'')+'</td></tr>' +
