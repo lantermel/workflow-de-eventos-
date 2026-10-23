@@ -1473,8 +1473,16 @@ teresa cristina - teresa.cristina@sirio.org.br"></textarea>
       <div class="card">
         <h2>Quadro sintético — previsto x realizado</h2>
         <div class="jul-folha-ctrl" style="margin-bottom:.8rem;">
-          <label>Setor do evento</label>
-          <select id="rel-filtro-setor" style="max-width:260px;"></select>
+          <div style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;">
+            <div style="min-width:200px;"><label style="margin-top:0;">Setor do evento</label>
+              <select id="rel-filtro-setor" style="max-width:260px;margin-bottom:0;"></select></div>
+            <div><label style="margin-top:0;">Data do evento — de</label>
+              <input type="date" id="rel-data-ini" style="width:auto;margin-bottom:0;"></div>
+            <div><label style="margin-top:0;">até</label>
+              <input type="date" id="rel-data-fim" style="width:auto;margin-bottom:0;"></div>
+            <div><button class="btn secondary sm" id="rel-data-limpar" type="button" style="margin:0;">Limpar período</button></div>
+          </div>
+          <div class="hint" id="rel-data-hint" style="text-transform:none;font-weight:normal;margin:.5rem 0 0;"></div>
         </div>
         <table>
           <thead><tr>
@@ -1838,9 +1846,20 @@ teresa cristina - teresa.cristina@sirio.org.br"></textarea>
       <div class="card" id="card-conf-estoque">
         <h2>Conferência de estoque — vendas × requisições <span class="badge amber">produtos prontos</span></h2>
         <p class="subtle">Para produto revendido sem elaboração (água, refrigerante, cerveja, isotônico, bomboniere, picolé, pão de queijo...), o estoque tem que fechar na conta:
-          <strong>inventário inicial + requisições − vendas = estoque esperado no fim do período</strong>. Digite a contagem real e a diferença aparece.
+          <strong>inventário inicial + requisições − vendas = estoque esperado no fim do período</strong>. Suba os arquivos do mês (vendas, requisições e inventário de fim de mês) e a conta aparece.
           Período: <strong id="conf-periodo"></strong>.</p>
         <div class="stat-row" id="conf-kpis"></div>
+        <div style="display:flex;gap:.7rem;flex-wrap:wrap;align-items:flex-end;margin:.2rem 0 .6rem;">
+          <div style="min-width:170px;"><label>Período</label><select id="conf-mes" style="margin-bottom:0;"></select></div>
+          <button class="btn sm gold" id="conf-btn-vendas" type="button" style="margin:0;">⬆ Vendas do mês</button>
+          <button class="btn sm gold" id="conf-btn-req" type="button" style="margin:0;">⬆ Requisições do mês</button>
+          <button class="btn sm gold" id="conf-btn-inv" type="button" style="margin:0;">⬆ Inventário</button>
+          <input type="file" id="conf-file-vendas" accept=".xls,.xlsx,.csv,.txt" style="display:none">
+          <input type="file" id="conf-file-req" accept=".xls,.xlsx,.csv,.txt" style="display:none">
+          <input type="file" id="conf-file-inv" accept=".xls,.xlsx,.csv,.txt" style="display:none">
+        </div>
+        <div class="hint" id="conf-fontes" style="text-transform:none;font-weight:normal;margin:0 0 .7rem;"></div>
+        <div class="note" id="conf-previa" style="display:none;margin:0 0 .9rem;"></div>
         <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end;margin-bottom:.8rem;">
           <div style="flex:1;min-width:170px;"><label>Buscar produto</label><input type="text" id="conf-busca" placeholder="Ex.: gatorade, água, heineken..."></div>
           <div style="min-width:170px;"><label>Visão</label>
@@ -1863,6 +1882,7 @@ teresa cristina - teresa.cristina@sirio.org.br"></textarea>
           </table>
         </div>
         <div class="hint" id="conf-rodape"></div>
+        <div id="conf-novos"></div>
         <details style="margin-top:1rem;">
           <summary style="cursor:pointer;font-family:Arial,Helvetica,sans-serif;font-size:.82rem;font-weight:bold;color:var(--navy);">Vendidos sem item correspondente no almoxarifado (<span id="conf-sem-n"></span>) — revisar o mapeamento</summary>
           <p class="hint">Produtos de grupos de bebida/bomboniere que venderam em setembro, mas que não casaram com nenhum item do almoxarifado, e por isso ficaram fora da conta acima.</p>
@@ -2281,7 +2301,7 @@ teresa cristina - teresa.cristina@sirio.org.br"></textarea>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const VERSAO_FERRAMENTA = 'v166';
+const VERSAO_FERRAMENTA = 'v169';
 const VERSAO_DATA = '19/10/2026';
 /* ================= CONEXÃO COM O BACKEND (SUPABASE) =================
    Preencha as DUAS constantes abaixo com os dados do seu projeto:
@@ -8642,15 +8662,60 @@ function relFiltroSetorOpcoes(){
     sel.dataset.ligado = '1';
   }
 }
+/* Período entre duas datas (data do evento). Qualquer um dos dois lados pode ficar vazio.
+   Se vierem invertidos, a menor vira o início. Evento sem data não entra quando há período. */
+function relPeriodo(){
+  const gi = function(id){ const e = document.getElementById(id); return e && e.value ? e.value : ''; };
+  let ini = gi('rel-data-ini'), fim = gi('rel-data-fim'), invertido = false;
+  if(ini && fim && ini > fim){ const t = ini; ini = fim; fim = t; invertido = true; }
+  return { ini:ini, fim:fim, ativo:!!(ini || fim), invertido:invertido };
+}
 function relEventosFiltrados(){
   const sel = document.getElementById('rel-filtro-setor');
   const v = sel ? sel.value : '';
+  const per = relPeriodo();
   return SOLICITACOES.filter(function(s){
     if(!podeVerEvento(s)) return false;
-    if(!v) return true;
-    const se = setorDoEvento(s);
-    return v === '__sem' ? !se : se === v;
+    if(v){
+      const se = setorDoEvento(s);
+      if(v === '__sem' ? !!se : se !== v) return false;
+    }
+    if(per.ativo){
+      const d = String(s.data || '').slice(0,10);
+      if(!d) return false;
+      if(per.ini && d < per.ini) return false;
+      if(per.fim && d > per.fim) return false;
+    }
+    return true;
   });
+}
+function relPeriodoLigar(){
+  const ids = ['rel-data-ini','rel-data-fim'];
+  ids.forEach(function(id){
+    const e = document.getElementById(id);
+    if(!e || e.dataset.ligado) return;
+    e.addEventListener('change', function(){ renderRelatorio(); relopOpcoes(); relopRender(); });
+    e.dataset.ligado = '1';
+  });
+  const b = document.getElementById('rel-data-limpar');
+  if(b && !b.dataset.ligado){
+    b.addEventListener('click', function(){
+      ids.forEach(function(id){ const e = document.getElementById(id); if(e) e.value = ''; });
+      renderRelatorio(); relopOpcoes(); relopRender();
+    });
+    b.dataset.ligado = '1';
+  }
+}
+function relPeriodoHint(){
+  const h = document.getElementById('rel-data-hint'); if(!h) return;
+  const per = relPeriodo();
+  if(!per.ativo){ h.textContent = ''; return; }
+  const semData = SOLICITACOES.filter(function(s){ return podeVerEvento(s) && !s.data; }).length;
+  h.textContent = 'Mostrando eventos ' + (per.ini && per.fim ? 'de ' + fmtDataBR(per.ini) + ' a ' + fmtDataBR(per.fim)
+      : per.ini ? 'a partir de ' + fmtDataBR(per.ini) : 'até ' + fmtDataBR(per.fim)) + '.' +
+    (per.invertido ? ' As datas estavam invertidas e foram ajustadas.' : '') +
+    (semData ? ' ' + semData + ' evento(s) sem data não aparecem enquanto houver período.' : '') +
+    ' O período também vale para o relatório operacional e para as exportações.';
 }
 
 /* ============ RELATÓRIO OPERACIONAL — PRESTAÇÃO DE CONTAS ============
@@ -9035,12 +9100,14 @@ function renderRelatorio(){ return _comMemoProdutos(function(){
   const body = document.getElementById('rel-body');
   const empty = document.getElementById('rel-empty');
   relFiltroSetorOpcoes();
+  relPeriodoLigar();
+  relPeriodoHint();
   const alvo = relEventosFiltrados();
   if(alvo.length===0){
     body.innerHTML='';
     empty.style.display='block';
     empty.textContent = SOLICITACOES.length
-      ? 'Nenhum evento no setor selecionado.'
+      ? (relPeriodo().ativo ? 'Nenhum evento no setor e no período selecionados.' : 'Nenhum evento no setor selecionado.')
       : 'Nenhuma solicitação registrada ainda.';
     return;
   }
@@ -10451,34 +10518,373 @@ function renderCMVAlvoRows(pdvs){
 }
 
 /* ============ CONFERÊNCIA DE ESTOQUE: VENDAS x REQUISIÇÕES x INVENTÁRIO ============
-   Produto pronto, revendido sem elaboração, tem que fechar na conta:
-       inventário inicial + requisições do período − vendas = estoque esperado no fim.
-   Casamento: vendas usam o código do PDV e o almoxarifado usa o código do material,
-   então o vínculo é por nome (exato ou mapeado à mão). Inventário e requisição se
-   ligam pelo código do material. A requisição é lançada em UM centro de custo por item
-   (ex.: toda a água sem gás foi para Sala Damasco), por isso a visão confiável é a
-   consolidada; a visão por PDV serve para localizar onde o movimento aconteceu.
-   Base: planilha de setembro/2026 (dados embutidos). A contagem de fim de período
-   é digitada na tela e gravada no servidor. */
-const CONF_ESTOQUE = {"chave":"2026-09","mes":"Setembro/2026","invData":"31/08/2026","ini":"01/09/2026","fim":"30/09/2026","dias":30,"fonte":"VENDASXREQUISICOES_setembroPQ.xlsx","pdvs":["Amani","Bar Academia","All Sport Bar","Sala Damasco","Bar Carteado","Buffet Social"],"semInv":["Sala Damasco","Bar Carteado","Buffet Social"],"itens":[[0,"511080001","AGUA C/ GAS 510ML","UN",1.327,224.0,0.0,918.0],[0,"511080006","AGUA COCO KEROCOCO 1LT","LT",9.5318,8.0,96.0,38.0],[0,"511080003","AGUA COCO KEROCOCO 330ML","UN",3.8884,43.0,0.0,45.0],[0,"511080007","AGUA H2OH! LIMAO","UN",3.995,41.0,192.0,173.0],[0,"511080025","AGUA H2OH! LIMONETO","UN",3.9839,23.0,222.0,135.0],[0,"511080012","AGUA S/ GAS 510ML","UN",0.9954,231.0,0.0,1297.0],[0,"511080018","AGUA TONICA 350ML","LT",2.9941,30.0,0.0,28.0],[0,"511080017","AGUA TONICA DIET 350ML","LT",2.9913,25.0,192.0,95.0],[0,"511080019","AGUA TONICA SCHWEPPES CITRUS","LT",3.4868,7.0,36.0,23.0],[0,"511443021","AMENDOIM S/ PELE 200G BRA FRUT","PT",4.7367,2.0,0.0,6.0],[0,"510825053","BANANINHA CRISTAL","UN",1.4509,6.0,0.0,6.0],[0,"510825054","BANANINHA ZERO","UN",1.4812,25.0,0.0,9.0],[0,"510870001","BOMBOM FERRERO ROCHER","UN",9.5388,49.0,0.0,135.0],[0,"510870002","BOMBOM OURO BRANCO","UN",1.2151,22.0,92.0,30.0],[0,"510870003","BOMBOM SONHO VALSA","UN",1.2056,11.0,92.0,23.0],[0,"511188066","CERVEJA  CORONA LONG NECK","UN",7.3698,44.0,48.0,48.0],[0,"511188075","CERVEJA CERPA EXPORT LN 350ML","UN",5.5241,16.0,84.0,38.0],[0,"511188063","CERVEJA HEINEKEN LN SEM ALCOOL","LT",6.4642,22.0,48.0,40.0],[0,"511188045","CERVEJA HEINNEKEN  600 ML","UN",9.2874,181.0,492.0,267.0],[0,"511188038","CERVEJA HEINNEKEN LN 355 ML","UN",6.3734,41.0,0.0,96.0],[0,"511188009","CERVEJA ORIGINAL GARRAFA","UN",8.1719,121.0,0.0,217.0],[0,"511188018","CERVEJA SPATEN 600ML","UN",7.7423,11.0,66.0,1.0],[0,"511188061","CERVEJA STELLA S/GLUTEM 330ML","UN",6.934,0.0,0.0,241.0],[0,"511188069","CERVEJA STELLA S/GLUTEM 600ML","UN",8.1425,0.0,0.0,3.0],[0,"511082064","CHA VERDE YAI LARANJA GENGIBRE","LT",4.0371,32.0,0.0,42.0],[0,"511082065","CHA VERDE YAI LICHIA","LT",4.0492,35.0,0.0,129.0],[0,"511082066","CHA VERDE YAI LIMAO HORTELA","LT",4.0202,34.0,0.0,60.0],[0,"510870006","CHOC ALPINO","UN",2.046,61.0,60.0,88.0],[0,"510870038","CHOC BATOM GAROTO","UN",1.477,0.0,60.0,87.0],[0,"510870008","CHOC CHOKITO (CX 30)","UN",2.5779,1.0,30.0,25.0],[0,"510870054","CHOC DIAMANTE NEGRO","UN",2.4245,0.0,40.0,65.0],[0,"510870055","CHOC KIT KAT","UN",3.4996,0.0,72.0,53.0],[0,"510870009","CHOC LAKA","UN",2.4245,0.0,100.0,120.0],[0,"510870012","CHOC PRESTIGIO","UN",2.5845,27.0,30.0,50.0],[0,"510870057","CHOC SNICKERS","UN",3.2552,35.0,0.0,69.0],[0,"510870013","CHOC SULFLAIR (CX 20)","UN",4.9079,25.0,60.0,83.0],[0,"510870016","CHOC TWIX","UN",1.1365,10.0,0.0,39.0],[0,"500150051","COCO DESCASCADO","UN",8.4,0.0,0.0,1.0],[0,"500150057","COCO VERDE","UN",3.8087,0.0,380.0,225.0],[0,"510870017","CONFEITO CHOC M&M","UN",4.0074,30.0,72.0,98.0],[0,"510870059","CONFEITO SKITTLES","UN",2.9255,82.0,0.0,22.0],[0,"510870022","CONFEITO TIC TAC","PT",2.2215,2.0,0.0,18.0],[0,"510870060","DOCE LEITE PINGO","UN",0.7933,38.0,0.0,22.0],[0,"510870023","DROPS FRUIT TELLA (CX 15","UN",2.356,32.0,0.0,50.0],[0,"510870024","DROPS HALLS (CX 21)","UN",1.2814,19.0,0.0,31.0],[0,"510870030","DROPS MENTOS MENTA","UN",2.13,31.0,0.0,91.0],[0,"511082003","GATORADE LARANJA","UN",4.6657,21.0,0.0,26.0],[0,"511082005","GATORADE LIMAO","UN",4.6648,16.0,0.0,19.0],[0,"511082007","GATORADE MORANGO MARACUJA","UN",4.6635,0.0,0.0,21.0],[0,"511082008","GATORADE TANGERINA","UN",4.6744,15.0,0.0,22.0],[0,"511082009","GATORADE UVA","UN",4.6646,0.0,0.0,3.0],[0,"510871022","GOMA MASCAR TUBO","UN",0.5922,19.0,60.0,35.0],[0,"510871033","PACOQUITA SANTA HELENA","UN",0.5177,4.0,0.0,2.0],[0,"521492007","PAO QUEIJO UNIDADE","UN",2.5275,29.0,0.0,103.0],[0,"511081006","REFR COCA COLA  ZERO 350ML","LT",3.5171,92.0,0.0,1039.0],[0,"511081003","REFR COCA COLA 350ML","LT",3.4901,189.0,0.0,305.0],[0,"511081008","REFR FANTA LARANJA 350ML","LT",2.941,0.0,0.0,5.0],[0,"511081012","REFR GUARANA 350ML","LT",2.9685,36.0,156.0,56.0],[0,"511081013","REFR GUARANA DIET 350ML","LT",3.0479,65.0,0.0,214.0],[0,"511081019","REFR SODA LIMONADA 350ML","LT",2.77,8.0,0.0,15.0],[0,"511081018","REFR SODA LIMONADA DIET 350ML","LT",2.738,0.0,132.0,83.0],[0,"510872069","SORVETE KIBON BRIGADEIRO","UN",6.7859,41.0,66.0,89.0],[0,"510872031","SORVETE KIBON CHICABON","UN",6.8247,84.0,0.0,46.0],[0,"510872042","SORVETE KIBON CORNETO CROCANTE","UN",8.2839,34.0,24.0,30.0],[0,"510872127","SORVETE KIBON FRUTARE LIMAO","UN",5.3254,23.0,28.0,16.0],[0,"510872026","SORVETE KIBON FRUTARE UVA","UN",5.2456,29.0,28.0,22.0],[0,"510872073","SORVETE KIBON MAGNUM CHC. BRAN","UN",13.5979,19.0,18.0,4.0],[0,"510872072","SORVETE KIBON MAGNUM CLASSICO","UN",11.592,53.0,18.0,4.0],[0,"510872077","SORVETE KIBON MINI ESKI-BON","UN",10.6067,37.0,24.0,48.0],[0,"510872041","SORVETE KIBON TABLITO","UN",7.2188,27.0,24.0,27.0],[0,"510872079","SORVETE ROCHINHA  MELANCIA","UN",6.4297,22.0,28.0,17.0],[0,"510872080","SORVETE ROCHINHA ABACATE","UN",7.65,16.0,0.0,3.0],[0,"510872082","SORVETE ROCHINHA ACAI GUARANA","UN",6.5402,13.0,14.0,14.0],[0,"510872085","SORVETE ROCHINHA BLUE ICE","UN",5.5598,16.0,42.0,45.0],[0,"510872086","SORVETE ROCHINHA CHOCOLATE","UN",7.6389,19.0,0.0,11.0],[0,"510872087","SORVETE ROCHINHA COCO BRANCO","UN",7.834,23.0,0.0,16.0],[0,"510872376","SORVETE ROCHINHA COCO BRANCO Z","UN",8.2943,11.0,0.0,2.0],[0,"510872091","SORVETE ROCHINHA GROSELHA","UN",5.6545,28.0,0.0,13.0],[0,"510872093","SORVETE ROCHINHA LIMAO","UN",6.5618,27.0,28.0,23.0],[0,"510872094","SORVETE ROCHINHA MARACUJA","UN",6.6094,18.0,0.0,3.0],[0,"510872095","SORVETE ROCHINHA MILHO VERDE","UN",7.5912,14.0,14.0,14.0],[0,"510872097","SORVETE ROCHINHA MORANGO","UN",7.6508,7.0,28.0,26.0],[0,"510872100","SORVETE ROCHINHA TANGERINA","UN",6.4567,48.0,14.0,11.0],[0,"510872101","SORVETE ROCHINHA UVA","UN",6.5587,24.0,28.0,41.0],[0,"511082012","SUCO DEL VALLE PESSEGO","LT",3.6081,11.0,0.0,30.0],[0,"511082014","SUCO DEL VALLE UVA","LT",3.6291,33.0,0.0,110.0],[0,"511187368","V B ANUBIS CHARDONNAY","UN",37.4027,8.0,12.0,9.0],[0,"511587044","V B BONS VENTOS BRANCO","UN",47.1267,3.0,0.0,3.0],[0,"511187379","V B CALLIA TORRONTES","UN",42.75,0.0,6.0,5.0],[0,"511587043","V B DUFOULEUR MONOPOLE","UN",60.0,8.0,0.0,0.0],[0,"511187366","V B LIDIO CARRARO CHARDO 187ML","UN",18.1247,5.0,0.0,0.0],[0,"511187294","V R VENTISQUERO RESERVA ROSE","UN",56.6972,9.0,0.0,1.0],[0,"511187388","V T ANUBIS RED BLEND","UN",40.9667,5.0,6.0,3.0],[0,"511187310","V T ARG ANUBIS MALBEC SUSANA BALBO","UN",35.8513,6.0,0.0,5.0],[0,"511187350","V T CALLIA MALBEC","UN",31.35,0.0,6.0,2.0],[0,"511187381","V T CALLIA MALBEC 375ML","UN",28.822,4.0,9.0,5.0],[0,"511187321","V T CEST LA VIE PINOT SYRAH","UN",79.24,6.0,0.0,0.0],[0,"50461013","V T CHAUTEAU JAMIN 2021","GF",70.0,11.0,0.0,9.0],[0,"511187372","V T VENTISQUERO RESER CAB SAUV","UN",58.3083,6.0,0.0,0.0],[0,"511587067","VB CEST LA VIE BLANC","UN",79.73,2.0,0.0,1.0],[0,"511587048","VT RAMIRANA RESERVA CARMENERE","UN",74.265,2.0,0.0,1.0],[1,"511080001","AGUA C/ GAS 510ML","UN",1.327,78.0,1824.0,323.0],[1,"511080006","AGUA COCO KEROCOCO 1LT","LT",9.5318,20.0,0.0,37.0],[1,"511080003","AGUA COCO KEROCOCO 330ML","UN",3.8884,72.0,420.0,287.0],[1,"511080007","AGUA H2OH! LIMAO","UN",3.995,18.0,0.0,23.0],[1,"511080025","AGUA H2OH! LIMONETO","UN",3.9839,10.0,0.0,32.0],[1,"511080012","AGUA S/ GAS 510ML","UN",0.9954,149.0,0.0,534.0],[1,"511080021","AGUA S/ GAS 510ML FITNESS","UN",1.3757,38.0,168.0,114.0],[1,"511080018","AGUA TONICA 350ML","LT",2.9941,12.0,0.0,4.0],[1,"511080017","AGUA TONICA DIET 350ML","LT",2.9913,4.0,0.0,10.0],[1,"511080019","AGUA TONICA SCHWEPPES CITRUS","LT",3.4868,6.0,0.0,5.0],[1,"511443021","AMENDOIM S/ PELE 200G BRA FRUT","PT",4.7367,8.0,5.0,4.0],[1,"510825053","BANANINHA CRISTAL","UN",1.4509,36.0,120.0,103.0],[1,"510825054","BANANINHA ZERO","UN",1.4812,40.0,150.0,140.0],[1,"510870046","BARRA MIXED NUTS ORIGINAL","UN",3.4772,6.0,24.0,29.0],[1,"510870048","BARRA MIXED SEMENTES","UN",3.491,30.0,0.0,81.0],[1,"511492005","BATATA RUFLES 68GR","PT",5.4223,18.0,57.0,55.0],[1,"510870001","BOMBOM FERRERO ROCHER","UN",9.5388,0.0,128.0,26.0],[1,"510870002","BOMBOM OURO BRANCO","UN",1.2151,48.0,0.0,72.0],[1,"510870003","BOMBOM SONHO VALSA","UN",1.2056,58.0,0.0,55.0],[1,"511443011","CASTANHA TORRA 200G BRA FRUTT","PT",20.4232,11.0,5.0,4.0],[1,"511188066","CERVEJA  CORONA LONG NECK","UN",7.3698,0.0,0.0,9.0],[1,"511188047","CERVEJA HEINEKEN LATA 350ML","LT",5.1999,61.0,0.0,94.0],[1,"511188063","CERVEJA HEINEKEN LN SEM ALCOOL","LT",6.4642,17.0,0.0,6.0],[1,"511188045","CERVEJA HEINNEKEN  600 ML","UN",9.2874,60.0,0.0,46.0],[1,"511188038","CERVEJA HEINNEKEN LN 355 ML","UN",6.3734,20.0,0.0,20.0],[1,"511188009","CERVEJA ORIGINAL GARRAFA","UN",8.1719,56.0,0.0,55.0],[1,"511188018","CERVEJA SPATEN 600ML","UN",7.7423,0.0,0.0,2.0],[1,"511188061","CERVEJA STELLA S/GLUTEM 330ML","UN",6.934,0.0,0.0,65.0],[1,"511082064","CHA VERDE YAI LARANJA GENGIBRE","LT",4.0371,12.0,72.0,20.0],[1,"511082065","CHA VERDE YAI LICHIA","LT",4.0492,8.0,126.0,74.0],[1,"511082066","CHA VERDE YAI LIMAO HORTELA","LT",4.0202,14.0,84.0,28.0],[1,"510870055","CHOC KIT KAT","UN",3.4996,0.0,0.0,19.0],[1,"510870057","CHOC SNICKERS","UN",3.2552,0.0,80.0,31.0],[1,"510870016","CHOC TWIX","UN",1.1365,0.0,60.0,18.0],[1,"500150051","COCO DESCASCADO","UN",8.4,34.0,0.0,48.0],[1,"500150057","COCO VERDE","UN",3.8087,2.0,0.0,157.0],[1,"510870022","CONFEITO TIC TAC","PT",2.2215,16.0,126.0,122.0],[1,"510870023","DROPS FRUIT TELLA (CX 15","UN",2.356,24.0,176.0,136.0],[1,"510870024","DROPS HALLS (CX 21)","UN",1.2814,18.0,42.0,26.0],[1,"510870030","DROPS MENTOS MENTA","UN",2.13,26.0,256.0,184.0],[1,"511581004","ENERGETICO MONSTER 473ml","UN",7.8946,4.0,6.0,6.0],[1,"511082003","GATORADE LARANJA","UN",4.6657,28.0,150.0,51.0],[1,"511082005","GATORADE LIMAO","UN",4.6648,20.0,126.0,95.0],[1,"511082007","GATORADE MORANGO MARACUJA","UN",4.6635,2.0,0.0,81.0],[1,"511082008","GATORADE TANGERINA","UN",4.6744,24.0,174.0,99.0],[1,"511082009","GATORADE UVA","UN",4.6646,16.0,66.0,47.0],[1,"511082069","GATORADE ZERO FRUTAS SILVESTRE","UN",2.6623,0.0,60.0,48.0],[1,"511082056","ISOTONICO POWERADE FRUTAS TROP","UN",3.4321,0.0,18.0,43.0],[1,"511082058","ISOTONICO POWERADE LARANJA","UN",3.4321,0.0,24.0,22.0],[1,"511082057","ISOTONICO POWERADE LIMAO","UN",3.6087,0.0,12.0,1.0],[1,"511582004","ISOTONICO POWERADE MOUNTAIN","UN",3.4321,0.0,48.0,37.0],[1,"511443015","MIX AMENDOIM 200G BRA FRUTT","PT",5.562,12.0,0.0,5.0],[1,"510871083","PACOCA SANTA HELENA DIET","UN",1.3921,26.0,96.0,72.0],[1,"510871033","PACOQUITA SANTA HELENA","UN",0.5177,42.0,800.0,178.0],[1,"510872402","PAO DE MEL DOCE DE LEITE","UN",6.9846,17.0,0.0,52.0],[1,"521492007","PAO QUEIJO UNIDADE","UN",2.5275,246.0,3038.0,1787.0],[1,"511082052","RED BULL 250 ML","LT",8.4536,0.0,48.0,24.0],[1,"511082047","RED BULL TROPICAL 250ML","LT",8.3534,9.0,0.0,5.0],[1,"511081006","REFR COCA COLA  ZERO 350ML","LT",3.5171,30.0,1476.0,115.0],[1,"511081003","REFR COCA COLA 350ML","LT",3.4901,27.0,540.0,77.0],[1,"511081008","REFR FANTA LARANJA 350ML","LT",2.941,2.0,30.0,2.0],[1,"511081012","REFR GUARANA 350ML","LT",2.9685,12.0,0.0,9.0],[1,"511081013","REFR GUARANA DIET 350ML","LT",3.0479,8.0,300.0,8.0],[1,"511081019","REFR SODA LIMONADA 350ML","LT",2.77,4.0,0.0,1.0],[1,"511081018","REFR SODA LIMONADA DIET 350ML","LT",2.738,0.0,0.0,5.0],[1,"511082012","SUCO DEL VALLE PESSEGO","LT",3.6081,12.0,96.0,49.0],[1,"511082014","SUCO DEL VALLE UVA","LT",3.6291,16.0,264.0,98.0],[1,"511492158","SUPLE ALIM YOPRO CHOC 15G","KG",6.79,6.0,38.0,34.0],[1,"511492159","SUPLE ALIM YOPRO MORANGO 15G","KG",6.7882,18.0,15.0,25.0],[2,"511080001","AGUA C/ GAS 510ML","UN",1.327,65.0,0.0,83.0],[2,"511080006","AGUA COCO KEROCOCO 1LT","LT",9.5318,5.0,0.0,6.0],[2,"511080003","AGUA COCO KEROCOCO 330ML","UN",3.8884,9.0,0.0,47.0],[2,"511080007","AGUA H2OH! LIMAO","UN",3.995,12.0,0.0,15.0],[2,"511080025","AGUA H2OH! LIMONETO","UN",3.9839,2.0,0.0,9.0],[2,"511080012","AGUA S/ GAS 510ML","UN",0.9954,62.0,0.0,136.0],[2,"511080018","AGUA TONICA 350ML","LT",2.9941,17.0,0.0,1.0],[2,"511080017","AGUA TONICA DIET 350ML","LT",2.9913,9.0,0.0,11.0],[2,"511080019","AGUA TONICA SCHWEPPES CITRUS","LT",3.4868,7.0,0.0,2.0],[2,"511443021","AMENDOIM S/ PELE 200G BRA FRUT","PT",4.7367,10.0,0.0,5.0],[2,"511443011","CASTANHA TORRA 200G BRA FRUTT","PT",20.4232,8.0,0.0,7.0],[2,"511188066","CERVEJA  CORONA LONG NECK","UN",7.3698,62.0,0.0,12.0],[2,"511188067","CERVEJA BECK 600ML","UN",6.9541,0.0,24.0,24.0],[2,"511188075","CERVEJA CERPA EXPORT LN 350ML","UN",5.5241,55.0,0.0,41.0],[2,"511188063","CERVEJA HEINEKEN LN SEM ALCOOL","LT",6.4642,20.0,0.0,9.0],[2,"511188045","CERVEJA HEINNEKEN  600 ML","UN",9.2874,106.0,0.0,171.0],[2,"511188038","CERVEJA HEINNEKEN LN 355 ML","UN",6.3734,56.0,0.0,26.0],[2,"511188009","CERVEJA ORIGINAL GARRAFA","UN",8.1719,110.0,336.0,100.0],[2,"511188018","CERVEJA SPATEN 600ML","UN",7.7423,7.0,0.0,59.0],[2,"511188061","CERVEJA STELLA S/GLUTEM 330ML","UN",6.934,60.0,0.0,190.0],[2,"511188069","CERVEJA STELLA S/GLUTEM 600ML","UN",8.1425,0.0,48.0,33.0],[2,"500150051","COCO DESCASCADO","UN",8.4,1.0,72.0,24.0],[2,"511532147","EMPANADA CARNE","UN",5.7,0.0,24.0,15.0],[2,"511532149","EMPANADA CEBOLA QUEIJO","UN",5.7,0.0,24.0,10.0],[2,"511082003","GATORADE LARANJA","UN",4.6657,7.0,0.0,11.0],[2,"511082005","GATORADE LIMAO","UN",4.6648,13.0,0.0,4.0],[2,"511082008","GATORADE TANGERINA","UN",4.6744,9.0,0.0,8.0],[2,"511082009","GATORADE UVA","UN",4.6646,3.0,0.0,0.0],[2,"511082052","RED BULL 250 ML","LT",8.4536,36.0,0.0,4.0],[2,"511082047","RED BULL TROPICAL 250ML","LT",8.3534,16.0,0.0,0.0],[2,"511081006","REFR COCA COLA  ZERO 350ML","LT",3.5171,31.0,0.0,163.0],[2,"511081003","REFR COCA COLA 350ML","LT",3.4901,31.0,0.0,39.0],[2,"511081008","REFR FANTA LARANJA 350ML","LT",2.941,12.0,0.0,2.0],[2,"511081012","REFR GUARANA 350ML","LT",2.9685,20.0,0.0,8.0],[2,"511081013","REFR GUARANA DIET 350ML","LT",3.0479,21.0,0.0,22.0],[2,"511081019","REFR SODA LIMONADA 350ML","LT",2.77,21.0,0.0,3.0],[2,"511081018","REFR SODA LIMONADA DIET 350ML","LT",2.738,12.0,0.0,21.0],[2,"510872069","SORVETE KIBON BRIGADEIRO","UN",6.7859,0.0,0.0,3.0],[2,"510872031","SORVETE KIBON CHICABON","UN",6.8247,0.0,0.0,2.0],[2,"510872042","SORVETE KIBON CORNETO CROCANTE","UN",8.2839,0.0,0.0,1.0],[2,"510872077","SORVETE KIBON MINI ESKI-BON","UN",10.6067,0.0,0.0,4.0],[2,"510872101","SORVETE ROCHINHA UVA","UN",6.5587,0.0,0.0,1.0],[2,"511082012","SUCO DEL VALLE PESSEGO","LT",3.6081,18.0,0.0,17.0],[2,"511082014","SUCO DEL VALLE UVA","LT",3.6291,22.0,0.0,32.0],[2,"511187368","V B ANUBIS CHARDONNAY","UN",37.4027,0.0,0.0,1.0],[2,"511187379","V B CALLIA TORRONTES","UN",42.75,0.0,0.0,1.0],[2,"511187366","V B LIDIO CARRARO CHARDO 187ML","UN",18.1247,0.0,0.0,4.0],[2,"511187388","V T ANUBIS RED BLEND","UN",40.9667,0.0,0.0,5.0],[2,"511187310","V T ARG ANUBIS MALBEC SUSANA BALBO","UN",35.8513,0.0,0.0,1.0],[2,"511187350","V T CALLIA MALBEC","UN",31.35,0.0,0.0,3.0],[2,"511187321","V T CEST LA VIE PINOT SYRAH","UN",79.24,0.0,0.0,1.0],[2,"511587048","VT RAMIRANA RESERVA CARMENERE","UN",74.265,0.0,0.0,1.0],[3,"511080001","AGUA C/ GAS 510ML","UN",1.327,0.0,0.0,122.0],[3,"511080012","AGUA S/ GAS 510ML","UN",0.9954,0.0,3354.0,189.0],[3,"521492007","PAO QUEIJO UNIDADE","UN",2.5275,0.0,0.0,26.0],[3,"511081006","REFR COCA COLA  ZERO 350ML","LT",3.5171,0.0,0.0,12.0],[3,"511081003","REFR COCA COLA 350ML","LT",3.4901,0.0,0.0,12.0],[3,"511081012","REFR GUARANA 350ML","LT",2.9685,0.0,0.0,5.0],[3,"511081013","REFR GUARANA DIET 350ML","LT",3.0479,0.0,0.0,4.0],[4,"511080001","AGUA C/ GAS 510ML","UN",1.327,0.0,0.0,54.0],[4,"511080007","AGUA H2OH! LIMAO","UN",3.995,0.0,0.0,12.0],[4,"511080025","AGUA H2OH! LIMONETO","UN",3.9839,0.0,0.0,9.0],[4,"511080012","AGUA S/ GAS 510ML","UN",0.9954,0.0,0.0,105.0],[4,"511080018","AGUA TONICA 350ML","LT",2.9941,0.0,90.0,7.0],[4,"511080017","AGUA TONICA DIET 350ML","LT",2.9913,0.0,0.0,5.0],[4,"511188038","CERVEJA HEINNEKEN LN 355 ML","UN",6.3734,0.0,408.0,11.0],[4,"511188061","CERVEJA STELLA S/GLUTEM 330ML","UN",6.934,0.0,678.0,0.0],[4,"511081006","REFR COCA COLA  ZERO 350ML","LT",3.5171,0.0,0.0,11.0],[4,"511081003","REFR COCA COLA 350ML","LT",3.4901,0.0,0.0,29.0],[4,"511081013","REFR GUARANA DIET 350ML","LT",3.0479,0.0,0.0,4.0],[4,"511081019","REFR SODA LIMONADA 350ML","LT",2.77,0.0,24.0,1.0],[4,"511081018","REFR SODA LIMONADA DIET 350ML","LT",2.738,0.0,0.0,1.0],[4,"511187350","V T CALLIA MALBEC","UN",31.35,0.0,0.0,1.0],[5,"511080001","AGUA C/ GAS 510ML","UN",1.327,0.0,0.0,32.0],[5,"511080025","AGUA H2OH! LIMONETO","UN",3.9839,0.0,0.0,11.0],[5,"511080012","AGUA S/ GAS 510ML","UN",0.9954,0.0,0.0,42.0],[5,"511080017","AGUA TONICA DIET 350ML","LT",2.9913,0.0,0.0,2.0],[5,"511188038","CERVEJA HEINNEKEN LN 355 ML","UN",6.3734,0.0,0.0,4.0],[5,"511188009","CERVEJA ORIGINAL GARRAFA","UN",8.1719,0.0,0.0,2.0],[5,"511188061","CERVEJA STELLA S/GLUTEM 330ML","UN",6.934,0.0,0.0,2.0],[5,"511081006","REFR COCA COLA  ZERO 350ML","LT",3.5171,0.0,0.0,35.0],[5,"511081003","REFR COCA COLA 350ML","LT",3.4901,0.0,0.0,7.0],[5,"511081012","REFR GUARANA 350ML","LT",2.9685,0.0,0.0,4.0],[5,"511081013","REFR GUARANA DIET 350ML","LT",3.0479,0.0,0.0,9.0],[5,"511081019","REFR SODA LIMONADA 350ML","LT",2.77,0.0,0.0,1.0],[5,"511187368","V B ANUBIS CHARDONNAY","UN",37.4027,0.0,0.0,1.0],[5,"511587043","V B DUFOULEUR MONOPOLE","UN",60.0,0.0,0.0,1.0],[5,"511187294","V R VENTISQUERO RESERVA ROSE","UN",56.6972,0.0,0.0,2.0],[5,"511187372","V T VENTISQUERO RESER CAB SAUV","UN",58.3083,0.0,0.0,1.0]],"sem":[[51,"CHOPP HEINEKEN TULIPA","CERVEJA",119.0,1309,"Chope: sai por barril/litro, não há item unitário"],[6224,"CHOPP BRAHMA 300ML","CERVEJA",96.0,1248,"Chope: sai por barril/litro, não há item unitário"],[6223,"CHOPP HEINEKEN JAZZ 400ML","CERVEJA",36.0,612,"Chope: sai por barril/litro, não há item unitário"],[3630,"VT RAMIRANA GRAN RES. CAB. SAU","VINHO/ESPUMANTE/CHAMPANHE",3.0,480,"Sem item equivalente no almoxarifado"],[6225,"CHOPP HEINEKEN ROCK 515 ML","CERVEJA",21.0,441,"Chope: sai por barril/litro, não há item unitário"],[2472,"CHOPP HEINEKEN GAROTINHO 220ML","CERVEJA",36.0,324,"Chope: sai por barril/litro, não há item unitário"],[2094,"V E  FREIXENET ROYAL BRUT","VINHO/ESPUMANTE/CHAMPANHE",1.0,190,"Sem item equivalente no almoxarifado"],[2939,"CERVEJA CORONA ZERO LONG NECK","CERVEJA",11.0,143,"Sem item equivalente no almoxarifado"],[810,"V T LIDIO CARRARO MERLOT E CABERNET","VINHO/ESPUMANTE/CHAMPANHE",1.0,120,"Sem item equivalente no almoxarifado"],[1176,"V T FACES MERLOT","VINHO/ESPUMANTE/CHAMPANHE",1.0,120,"Sem item equivalente no almoxarifado"],[2437,"GATORADE MELANCIA COM MORANGO","ENERG./GATOR./SUCO E CHA PRONT",7.0,91,"Sabor sem item no almoxarifado: conferir se entrou com outro nome"],[563,"CARB UP GEL ACAI/GUARANA","CHOCOLATE/BALA/CHICLETE",10.0,90,"Sem item equivalente no almoxarifado"],[1274,"CERVEJA STELLA ARTOIS 6 UNI","CERVEJA",1.0,55,"Sem item equivalente no almoxarifado"],[3650,"DOSE PORTO TAWNY POCAS JR","VINHO/ESPUMANTE/CHAMPANHE",1.0,45,"Sem item equivalente no almoxarifado"],[4223,"V B VESTIQUEIRO CLAS CHARD 187","VINHO/ESPUMANTE/CHAMPANHE",1.0,35,"Sem item equivalente no almoxarifado"],[2701,"GATORADE ZERO LARANJA LIMA","ENERG./GATOR./SUCO E CHA PRONT",2.0,26,"Sabor sem item no almoxarifado: conferir se entrou com outro nome"],[3975,"GATORADE FRUTAS CITRICAS","ENERG./GATOR./SUCO E CHA PRONT",1.0,13,"Sabor sem item no almoxarifado: conferir se entrou com outro nome"],[1541,"CERVEJA STELLA S/ GLUTEN LATA 330ML","CERVEJA",1.0,13,"Sem item equivalente no almoxarifado"],[21,"GATORADE MARACUJA","ENERG./GATOR./SUCO E CHA PRONT",1.0,13,"Sabor sem item no almoxarifado: conferir se entrou com outro nome"],[1203,"CHOC NESTLE CLASIC DIET","CHOCOLATE/BALA/CHICLETE",1.0,8,"Sem item equivalente no almoxarifado"]]};
-const CONF_CHAVE = 'estoque:contagem:' + CONF_ESTOQUE.chave;
+   Produto pronto, revendido sem elaboração, tem que fechar na conta, mês a mês:
+       inventário do fim do mês anterior + requisições do mês − vendas = estoque esperado no fim do mês.
+   Cada mês usa três arquivos subidos pelos botões da tela, guardados no servidor:
+       vendas (exportação do PDV), requisições (almoxarifado) e inventário (um por data).
+   O inventário do último dia de um mês fecha esse mês e abre o seguinte automaticamente.
+   Setembro/2026 vem embutido (carga inicial a partir da planilha de vendas x requisições).
+   Casamento: vendas usam o código do PDV e o almoxarifado usa o código do material, então o vínculo é por
+   nome. CONF_MAPA traz os pares já validados à mão; produto novo entra sozinho quando o nome é idêntico
+   ao do almoxarifado e o código é de bebida/bomboniere (CONF_PREFIXOS_AUTO). Inventário e requisição se
+   ligam pelo código do material. A requisição é lançada em UM centro de custo por item (ex.: toda a água sem
+   gás foi para Sala Damasco), por isso a visão confiável é a consolidada; a por PDV serve para localizar.
+   Produto que não aparece no inventário conta como estoque zero (o inventário só lista o que tem saldo). */
+const CONF_BASE = {"chave":"2026-09","rotulo":"Setembro/2026","ini":"01/09/2026","fim":"30/09/2026","invData":"31/08/2026","invIso":"2026-08-31","fimIso":"2026-09-30","dias":30,"fonte":"VENDASXREQUISICOES_setembroPQ.xlsx","pdvs":["Amani","Bar Academia","All Sport Bar","Sala Damasco","Bar Carteado","Buffet Social"],"semInv":["Sala Damasco","Bar Carteado","Buffet Social"],"itens":[[0,"511080001","AGUA C/ GAS 510ML","UN",1.327,224.0,0.0,918.0],[0,"511080006","AGUA COCO KEROCOCO 1LT","LT",9.5318,8.0,96.0,38.0],[0,"511080003","AGUA COCO KEROCOCO 330ML","UN",3.8884,43.0,0.0,45.0],[0,"511080007","AGUA H2OH! LIMAO","UN",3.995,41.0,192.0,173.0],[0,"511080025","AGUA H2OH! LIMONETO","UN",3.9839,23.0,222.0,135.0],[0,"511080012","AGUA S/ GAS 510ML","UN",0.9954,231.0,0.0,1297.0],[0,"511080018","AGUA TONICA 350ML","LT",2.9941,30.0,0.0,28.0],[0,"511080017","AGUA TONICA DIET 350ML","LT",2.9913,25.0,192.0,95.0],[0,"511080019","AGUA TONICA SCHWEPPES CITRUS","LT",3.4868,7.0,36.0,23.0],[0,"511443021","AMENDOIM S/ PELE 200G BRA FRUT","PT",4.7367,2.0,0.0,6.0],[0,"510825053","BANANINHA CRISTAL","UN",1.4509,6.0,0.0,6.0],[0,"510825054","BANANINHA ZERO","UN",1.4812,25.0,0.0,9.0],[0,"510870001","BOMBOM FERRERO ROCHER","UN",9.5388,49.0,0.0,135.0],[0,"510870002","BOMBOM OURO BRANCO","UN",1.2151,22.0,92.0,30.0],[0,"510870003","BOMBOM SONHO VALSA","UN",1.2056,11.0,92.0,23.0],[0,"511188066","CERVEJA  CORONA LONG NECK","UN",7.3698,44.0,48.0,48.0],[0,"511188075","CERVEJA CERPA EXPORT LN 350ML","UN",5.5241,16.0,84.0,38.0],[0,"511188063","CERVEJA HEINEKEN LN SEM ALCOOL","LT",6.4642,22.0,48.0,40.0],[0,"511188045","CERVEJA HEINNEKEN  600 ML","UN",9.2874,181.0,492.0,267.0],[0,"511188038","CERVEJA HEINNEKEN LN 355 ML","UN",6.3734,41.0,0.0,96.0],[0,"511188009","CERVEJA ORIGINAL GARRAFA","UN",8.1719,121.0,0.0,217.0],[0,"511188018","CERVEJA SPATEN 600ML","UN",7.7423,11.0,66.0,1.0],[0,"511188061","CERVEJA STELLA S/GLUTEM 330ML","UN",6.934,0.0,0.0,241.0],[0,"511188069","CERVEJA STELLA S/GLUTEM 600ML","UN",8.1425,0.0,0.0,3.0],[0,"511082064","CHA VERDE YAI LARANJA GENGIBRE","LT",4.0371,32.0,0.0,42.0],[0,"511082065","CHA VERDE YAI LICHIA","LT",4.0492,35.0,0.0,129.0],[0,"511082066","CHA VERDE YAI LIMAO HORTELA","LT",4.0202,34.0,0.0,60.0],[0,"510870006","CHOC ALPINO","UN",2.046,61.0,60.0,88.0],[0,"510870038","CHOC BATOM GAROTO","UN",1.477,0.0,60.0,87.0],[0,"510870008","CHOC CHOKITO (CX 30)","UN",2.5779,1.0,30.0,25.0],[0,"510870054","CHOC DIAMANTE NEGRO","UN",2.4245,0.0,40.0,65.0],[0,"510870055","CHOC KIT KAT","UN",3.4996,0.0,72.0,53.0],[0,"510870009","CHOC LAKA","UN",2.4245,0.0,100.0,120.0],[0,"510870012","CHOC PRESTIGIO","UN",2.5845,27.0,30.0,50.0],[0,"510870057","CHOC SNICKERS","UN",3.2552,35.0,0.0,69.0],[0,"510870013","CHOC SULFLAIR (CX 20)","UN",4.9079,25.0,60.0,83.0],[0,"510870016","CHOC TWIX","UN",1.1365,10.0,0.0,39.0],[0,"500150051","COCO DESCASCADO","UN",8.4,0.0,0.0,1.0],[0,"500150057","COCO VERDE","UN",3.8087,0.0,380.0,225.0],[0,"510870017","CONFEITO CHOC M&M","UN",4.0074,30.0,72.0,98.0],[0,"510870059","CONFEITO SKITTLES","UN",2.9255,82.0,0.0,22.0],[0,"510870022","CONFEITO TIC TAC","PT",2.2215,2.0,0.0,18.0],[0,"510870060","DOCE LEITE PINGO","UN",0.7933,38.0,0.0,22.0],[0,"510870023","DROPS FRUIT TELLA (CX 15","UN",2.356,32.0,0.0,50.0],[0,"510870024","DROPS HALLS (CX 21)","UN",1.2814,19.0,0.0,31.0],[0,"510870030","DROPS MENTOS MENTA","UN",2.13,31.0,0.0,91.0],[0,"511082003","GATORADE LARANJA","UN",4.6657,21.0,0.0,26.0],[0,"511082005","GATORADE LIMAO","UN",4.6648,16.0,0.0,19.0],[0,"511082007","GATORADE MORANGO MARACUJA","UN",4.6635,0.0,0.0,21.0],[0,"511082008","GATORADE TANGERINA","UN",4.6744,15.0,0.0,22.0],[0,"511082009","GATORADE UVA","UN",4.6646,0.0,0.0,3.0],[0,"510871022","GOMA MASCAR TUBO","UN",0.5922,19.0,60.0,35.0],[0,"510871033","PACOQUITA SANTA HELENA","UN",0.5177,4.0,0.0,2.0],[0,"521492007","PAO QUEIJO UNIDADE","UN",2.5275,29.0,0.0,103.0],[0,"511081006","REFR COCA COLA  ZERO 350ML","LT",3.5171,92.0,0.0,1039.0],[0,"511081003","REFR COCA COLA 350ML","LT",3.4901,189.0,0.0,305.0],[0,"511081008","REFR FANTA LARANJA 350ML","LT",2.941,0.0,0.0,5.0],[0,"511081012","REFR GUARANA 350ML","LT",2.9685,36.0,156.0,56.0],[0,"511081013","REFR GUARANA DIET 350ML","LT",3.0479,65.0,0.0,214.0],[0,"511081019","REFR SODA LIMONADA 350ML","LT",2.77,8.0,0.0,15.0],[0,"511081018","REFR SODA LIMONADA DIET 350ML","LT",2.738,0.0,132.0,83.0],[0,"510872069","SORVETE KIBON BRIGADEIRO","UN",6.7859,41.0,66.0,89.0],[0,"510872031","SORVETE KIBON CHICABON","UN",6.8247,84.0,0.0,46.0],[0,"510872042","SORVETE KIBON CORNETO CROCANTE","UN",8.2839,34.0,24.0,30.0],[0,"510872127","SORVETE KIBON FRUTARE LIMAO","UN",5.3254,23.0,28.0,16.0],[0,"510872026","SORVETE KIBON FRUTARE UVA","UN",5.2456,29.0,28.0,22.0],[0,"510872073","SORVETE KIBON MAGNUM CHC. BRAN","UN",13.5979,19.0,18.0,4.0],[0,"510872072","SORVETE KIBON MAGNUM CLASSICO","UN",11.592,53.0,18.0,4.0],[0,"510872077","SORVETE KIBON MINI ESKI-BON","UN",10.6067,37.0,24.0,48.0],[0,"510872041","SORVETE KIBON TABLITO","UN",7.2188,27.0,24.0,27.0],[0,"510872079","SORVETE ROCHINHA  MELANCIA","UN",6.4297,22.0,28.0,17.0],[0,"510872080","SORVETE ROCHINHA ABACATE","UN",7.65,16.0,0.0,3.0],[0,"510872082","SORVETE ROCHINHA ACAI GUARANA","UN",6.5402,13.0,14.0,14.0],[0,"510872085","SORVETE ROCHINHA BLUE ICE","UN",5.5598,16.0,42.0,45.0],[0,"510872086","SORVETE ROCHINHA CHOCOLATE","UN",7.6389,19.0,0.0,11.0],[0,"510872087","SORVETE ROCHINHA COCO BRANCO","UN",7.834,23.0,0.0,16.0],[0,"510872376","SORVETE ROCHINHA COCO BRANCO Z","UN",8.2943,11.0,0.0,2.0],[0,"510872091","SORVETE ROCHINHA GROSELHA","UN",5.6545,28.0,0.0,13.0],[0,"510872093","SORVETE ROCHINHA LIMAO","UN",6.5618,27.0,28.0,23.0],[0,"510872094","SORVETE ROCHINHA MARACUJA","UN",6.6094,18.0,0.0,3.0],[0,"510872095","SORVETE ROCHINHA MILHO VERDE","UN",7.5912,14.0,14.0,14.0],[0,"510872097","SORVETE ROCHINHA MORANGO","UN",7.6508,7.0,28.0,26.0],[0,"510872100","SORVETE ROCHINHA TANGERINA","UN",6.4567,48.0,14.0,11.0],[0,"510872101","SORVETE ROCHINHA UVA","UN",6.5587,24.0,28.0,41.0],[0,"511082012","SUCO DEL VALLE PESSEGO","LT",3.6081,11.0,0.0,30.0],[0,"511082014","SUCO DEL VALLE UVA","LT",3.6291,33.0,0.0,110.0],[0,"511187368","V B ANUBIS CHARDONNAY","UN",37.4027,8.0,12.0,9.0],[0,"511587044","V B BONS VENTOS BRANCO","UN",47.1267,3.0,0.0,3.0],[0,"511187379","V B CALLIA TORRONTES","UN",42.75,0.0,6.0,5.0],[0,"511587043","V B DUFOULEUR MONOPOLE","UN",60.0,8.0,0.0,0.0],[0,"511187366","V B LIDIO CARRARO CHARDO 187ML","UN",18.1247,5.0,0.0,0.0],[0,"511187294","V R VENTISQUERO RESERVA ROSE","UN",56.6972,9.0,0.0,1.0],[0,"511187388","V T ANUBIS RED BLEND","UN",40.9667,5.0,6.0,3.0],[0,"511187310","V T ARG ANUBIS MALBEC SUSANA BALBO","UN",35.8513,6.0,0.0,5.0],[0,"511187350","V T CALLIA MALBEC","UN",31.35,0.0,6.0,2.0],[0,"511187381","V T CALLIA MALBEC 375ML","UN",28.822,4.0,9.0,5.0],[0,"511187321","V T CEST LA VIE PINOT SYRAH","UN",79.24,6.0,0.0,0.0],[0,"50461013","V T CHAUTEAU JAMIN 2021","GF",70.0,11.0,0.0,9.0],[0,"511187372","V T VENTISQUERO RESER CAB SAUV","UN",58.3083,6.0,0.0,0.0],[0,"511587067","VB CEST LA VIE BLANC","UN",79.73,2.0,0.0,1.0],[0,"511587048","VT RAMIRANA RESERVA CARMENERE","UN",74.265,2.0,0.0,1.0],[1,"511080001","AGUA C/ GAS 510ML","UN",1.327,78.0,1824.0,323.0],[1,"511080006","AGUA COCO KEROCOCO 1LT","LT",9.5318,20.0,0.0,37.0],[1,"511080003","AGUA COCO KEROCOCO 330ML","UN",3.8884,72.0,420.0,287.0],[1,"511080007","AGUA H2OH! LIMAO","UN",3.995,18.0,0.0,23.0],[1,"511080025","AGUA H2OH! LIMONETO","UN",3.9839,10.0,0.0,32.0],[1,"511080012","AGUA S/ GAS 510ML","UN",0.9954,149.0,0.0,534.0],[1,"511080021","AGUA S/ GAS 510ML FITNESS","UN",1.3757,38.0,168.0,114.0],[1,"511080018","AGUA TONICA 350ML","LT",2.9941,12.0,0.0,4.0],[1,"511080017","AGUA TONICA DIET 350ML","LT",2.9913,4.0,0.0,10.0],[1,"511080019","AGUA TONICA SCHWEPPES CITRUS","LT",3.4868,6.0,0.0,5.0],[1,"511443021","AMENDOIM S/ PELE 200G BRA FRUT","PT",4.7367,8.0,5.0,4.0],[1,"510825053","BANANINHA CRISTAL","UN",1.4509,36.0,120.0,103.0],[1,"510825054","BANANINHA ZERO","UN",1.4812,40.0,150.0,140.0],[1,"510870046","BARRA MIXED NUTS ORIGINAL","UN",3.4772,6.0,24.0,29.0],[1,"510870048","BARRA MIXED SEMENTES","UN",3.491,30.0,0.0,81.0],[1,"511492005","BATATA RUFLES 68GR","PT",5.4223,18.0,57.0,55.0],[1,"510870001","BOMBOM FERRERO ROCHER","UN",9.5388,0.0,128.0,26.0],[1,"510870002","BOMBOM OURO BRANCO","UN",1.2151,48.0,0.0,72.0],[1,"510870003","BOMBOM SONHO VALSA","UN",1.2056,58.0,0.0,55.0],[1,"511443011","CASTANHA TORRA 200G BRA FRUTT","PT",20.4232,11.0,5.0,4.0],[1,"511188066","CERVEJA  CORONA LONG NECK","UN",7.3698,0.0,0.0,9.0],[1,"511188047","CERVEJA HEINEKEN LATA 350ML","LT",5.1999,61.0,0.0,94.0],[1,"511188063","CERVEJA HEINEKEN LN SEM ALCOOL","LT",6.4642,17.0,0.0,6.0],[1,"511188045","CERVEJA HEINNEKEN  600 ML","UN",9.2874,60.0,0.0,46.0],[1,"511188038","CERVEJA HEINNEKEN LN 355 ML","UN",6.3734,20.0,0.0,20.0],[1,"511188009","CERVEJA ORIGINAL GARRAFA","UN",8.1719,56.0,0.0,55.0],[1,"511188018","CERVEJA SPATEN 600ML","UN",7.7423,0.0,0.0,2.0],[1,"511188061","CERVEJA STELLA S/GLUTEM 330ML","UN",6.934,0.0,0.0,65.0],[1,"511082064","CHA VERDE YAI LARANJA GENGIBRE","LT",4.0371,12.0,72.0,20.0],[1,"511082065","CHA VERDE YAI LICHIA","LT",4.0492,8.0,126.0,74.0],[1,"511082066","CHA VERDE YAI LIMAO HORTELA","LT",4.0202,14.0,84.0,28.0],[1,"510870055","CHOC KIT KAT","UN",3.4996,0.0,0.0,19.0],[1,"510870057","CHOC SNICKERS","UN",3.2552,0.0,80.0,31.0],[1,"510870016","CHOC TWIX","UN",1.1365,0.0,60.0,18.0],[1,"500150051","COCO DESCASCADO","UN",8.4,34.0,0.0,48.0],[1,"500150057","COCO VERDE","UN",3.8087,2.0,0.0,157.0],[1,"510870022","CONFEITO TIC TAC","PT",2.2215,16.0,126.0,122.0],[1,"510870023","DROPS FRUIT TELLA (CX 15","UN",2.356,24.0,176.0,136.0],[1,"510870024","DROPS HALLS (CX 21)","UN",1.2814,18.0,42.0,26.0],[1,"510870030","DROPS MENTOS MENTA","UN",2.13,26.0,256.0,184.0],[1,"511581004","ENERGETICO MONSTER 473ml","UN",7.8946,4.0,6.0,6.0],[1,"511082003","GATORADE LARANJA","UN",4.6657,28.0,150.0,51.0],[1,"511082005","GATORADE LIMAO","UN",4.6648,20.0,126.0,95.0],[1,"511082007","GATORADE MORANGO MARACUJA","UN",4.6635,2.0,0.0,81.0],[1,"511082008","GATORADE TANGERINA","UN",4.6744,24.0,174.0,99.0],[1,"511082009","GATORADE UVA","UN",4.6646,16.0,66.0,47.0],[1,"511082069","GATORADE ZERO FRUTAS SILVESTRE","UN",2.6623,0.0,60.0,48.0],[1,"511082056","ISOTONICO POWERADE FRUTAS TROP","UN",3.4321,0.0,18.0,43.0],[1,"511082058","ISOTONICO POWERADE LARANJA","UN",3.4321,0.0,24.0,22.0],[1,"511082057","ISOTONICO POWERADE LIMAO","UN",3.6087,0.0,12.0,1.0],[1,"511582004","ISOTONICO POWERADE MOUNTAIN","UN",3.4321,0.0,48.0,37.0],[1,"511443015","MIX AMENDOIM 200G BRA FRUTT","PT",5.562,12.0,0.0,5.0],[1,"510871083","PACOCA SANTA HELENA DIET","UN",1.3921,26.0,96.0,72.0],[1,"510871033","PACOQUITA SANTA HELENA","UN",0.5177,42.0,800.0,178.0],[1,"510872402","PAO DE MEL DOCE DE LEITE","UN",6.9846,17.0,0.0,52.0],[1,"521492007","PAO QUEIJO UNIDADE","UN",2.5275,246.0,3038.0,1787.0],[1,"511082052","RED BULL 250 ML","LT",8.4536,0.0,48.0,24.0],[1,"511082047","RED BULL TROPICAL 250ML","LT",8.3534,9.0,0.0,5.0],[1,"511081006","REFR COCA COLA  ZERO 350ML","LT",3.5171,30.0,1476.0,115.0],[1,"511081003","REFR COCA COLA 350ML","LT",3.4901,27.0,540.0,77.0],[1,"511081008","REFR FANTA LARANJA 350ML","LT",2.941,2.0,30.0,2.0],[1,"511081012","REFR GUARANA 350ML","LT",2.9685,12.0,0.0,9.0],[1,"511081013","REFR GUARANA DIET 350ML","LT",3.0479,8.0,300.0,8.0],[1,"511081019","REFR SODA LIMONADA 350ML","LT",2.77,4.0,0.0,1.0],[1,"511081018","REFR SODA LIMONADA DIET 350ML","LT",2.738,0.0,0.0,5.0],[1,"511082012","SUCO DEL VALLE PESSEGO","LT",3.6081,12.0,96.0,49.0],[1,"511082014","SUCO DEL VALLE UVA","LT",3.6291,16.0,264.0,98.0],[1,"511492158","SUPLE ALIM YOPRO CHOC 15G","KG",6.79,6.0,38.0,34.0],[1,"511492159","SUPLE ALIM YOPRO MORANGO 15G","KG",6.7882,18.0,15.0,25.0],[2,"511080001","AGUA C/ GAS 510ML","UN",1.327,65.0,0.0,83.0],[2,"511080006","AGUA COCO KEROCOCO 1LT","LT",9.5318,5.0,0.0,6.0],[2,"511080003","AGUA COCO KEROCOCO 330ML","UN",3.8884,9.0,0.0,47.0],[2,"511080007","AGUA H2OH! LIMAO","UN",3.995,12.0,0.0,15.0],[2,"511080025","AGUA H2OH! LIMONETO","UN",3.9839,2.0,0.0,9.0],[2,"511080012","AGUA S/ GAS 510ML","UN",0.9954,62.0,0.0,136.0],[2,"511080018","AGUA TONICA 350ML","LT",2.9941,17.0,0.0,1.0],[2,"511080017","AGUA TONICA DIET 350ML","LT",2.9913,9.0,0.0,11.0],[2,"511080019","AGUA TONICA SCHWEPPES CITRUS","LT",3.4868,7.0,0.0,2.0],[2,"511443021","AMENDOIM S/ PELE 200G BRA FRUT","PT",4.7367,10.0,0.0,5.0],[2,"511443011","CASTANHA TORRA 200G BRA FRUTT","PT",20.4232,8.0,0.0,7.0],[2,"511188066","CERVEJA  CORONA LONG NECK","UN",7.3698,62.0,0.0,12.0],[2,"511188067","CERVEJA BECK 600ML","UN",6.9541,0.0,24.0,24.0],[2,"511188075","CERVEJA CERPA EXPORT LN 350ML","UN",5.5241,55.0,0.0,41.0],[2,"511188063","CERVEJA HEINEKEN LN SEM ALCOOL","LT",6.4642,20.0,0.0,9.0],[2,"511188045","CERVEJA HEINNEKEN  600 ML","UN",9.2874,106.0,0.0,171.0],[2,"511188038","CERVEJA HEINNEKEN LN 355 ML","UN",6.3734,56.0,0.0,26.0],[2,"511188009","CERVEJA ORIGINAL GARRAFA","UN",8.1719,110.0,336.0,100.0],[2,"511188018","CERVEJA SPATEN 600ML","UN",7.7423,7.0,0.0,59.0],[2,"511188061","CERVEJA STELLA S/GLUTEM 330ML","UN",6.934,60.0,0.0,190.0],[2,"511188069","CERVEJA STELLA S/GLUTEM 600ML","UN",8.1425,0.0,48.0,33.0],[2,"500150051","COCO DESCASCADO","UN",8.4,1.0,72.0,24.0],[2,"511532147","EMPANADA CARNE","UN",5.7,0.0,24.0,15.0],[2,"511532149","EMPANADA CEBOLA QUEIJO","UN",5.7,0.0,24.0,10.0],[2,"511082003","GATORADE LARANJA","UN",4.6657,7.0,0.0,11.0],[2,"511082005","GATORADE LIMAO","UN",4.6648,13.0,0.0,4.0],[2,"511082008","GATORADE TANGERINA","UN",4.6744,9.0,0.0,8.0],[2,"511082009","GATORADE UVA","UN",4.6646,3.0,0.0,0.0],[2,"511082052","RED BULL 250 ML","LT",8.4536,36.0,0.0,4.0],[2,"511082047","RED BULL TROPICAL 250ML","LT",8.3534,16.0,0.0,0.0],[2,"511081006","REFR COCA COLA  ZERO 350ML","LT",3.5171,31.0,0.0,163.0],[2,"511081003","REFR COCA COLA 350ML","LT",3.4901,31.0,0.0,39.0],[2,"511081008","REFR FANTA LARANJA 350ML","LT",2.941,12.0,0.0,2.0],[2,"511081012","REFR GUARANA 350ML","LT",2.9685,20.0,0.0,8.0],[2,"511081013","REFR GUARANA DIET 350ML","LT",3.0479,21.0,0.0,22.0],[2,"511081019","REFR SODA LIMONADA 350ML","LT",2.77,21.0,0.0,3.0],[2,"511081018","REFR SODA LIMONADA DIET 350ML","LT",2.738,12.0,0.0,21.0],[2,"510872069","SORVETE KIBON BRIGADEIRO","UN",6.7859,0.0,0.0,3.0],[2,"510872031","SORVETE KIBON CHICABON","UN",6.8247,0.0,0.0,2.0],[2,"510872042","SORVETE KIBON CORNETO CROCANTE","UN",8.2839,0.0,0.0,1.0],[2,"510872077","SORVETE KIBON MINI ESKI-BON","UN",10.6067,0.0,0.0,4.0],[2,"510872101","SORVETE ROCHINHA UVA","UN",6.5587,0.0,0.0,1.0],[2,"511082012","SUCO DEL VALLE PESSEGO","LT",3.6081,18.0,0.0,17.0],[2,"511082014","SUCO DEL VALLE UVA","LT",3.6291,22.0,0.0,32.0],[2,"511187368","V B ANUBIS CHARDONNAY","UN",37.4027,0.0,0.0,1.0],[2,"511187379","V B CALLIA TORRONTES","UN",42.75,0.0,0.0,1.0],[2,"511187366","V B LIDIO CARRARO CHARDO 187ML","UN",18.1247,0.0,0.0,4.0],[2,"511187388","V T ANUBIS RED BLEND","UN",40.9667,0.0,0.0,5.0],[2,"511187310","V T ARG ANUBIS MALBEC SUSANA BALBO","UN",35.8513,0.0,0.0,1.0],[2,"511187350","V T CALLIA MALBEC","UN",31.35,0.0,0.0,3.0],[2,"511187321","V T CEST LA VIE PINOT SYRAH","UN",79.24,0.0,0.0,1.0],[2,"511587048","VT RAMIRANA RESERVA CARMENERE","UN",74.265,0.0,0.0,1.0],[3,"511080001","AGUA C/ GAS 510ML","UN",1.327,0.0,0.0,122.0],[3,"511080012","AGUA S/ GAS 510ML","UN",0.9954,0.0,3354.0,189.0],[3,"521492007","PAO QUEIJO UNIDADE","UN",2.5275,0.0,0.0,26.0],[3,"511081006","REFR COCA COLA  ZERO 350ML","LT",3.5171,0.0,0.0,12.0],[3,"511081003","REFR COCA COLA 350ML","LT",3.4901,0.0,0.0,12.0],[3,"511081012","REFR GUARANA 350ML","LT",2.9685,0.0,0.0,5.0],[3,"511081013","REFR GUARANA DIET 350ML","LT",3.0479,0.0,0.0,4.0],[4,"511080001","AGUA C/ GAS 510ML","UN",1.327,0.0,0.0,54.0],[4,"511080007","AGUA H2OH! LIMAO","UN",3.995,0.0,0.0,12.0],[4,"511080025","AGUA H2OH! LIMONETO","UN",3.9839,0.0,0.0,9.0],[4,"511080012","AGUA S/ GAS 510ML","UN",0.9954,0.0,0.0,105.0],[4,"511080018","AGUA TONICA 350ML","LT",2.9941,0.0,90.0,7.0],[4,"511080017","AGUA TONICA DIET 350ML","LT",2.9913,0.0,0.0,5.0],[4,"511188038","CERVEJA HEINNEKEN LN 355 ML","UN",6.3734,0.0,408.0,11.0],[4,"511188061","CERVEJA STELLA S/GLUTEM 330ML","UN",6.934,0.0,678.0,0.0],[4,"511081006","REFR COCA COLA  ZERO 350ML","LT",3.5171,0.0,0.0,11.0],[4,"511081003","REFR COCA COLA 350ML","LT",3.4901,0.0,0.0,29.0],[4,"511081013","REFR GUARANA DIET 350ML","LT",3.0479,0.0,0.0,4.0],[4,"511081019","REFR SODA LIMONADA 350ML","LT",2.77,0.0,24.0,1.0],[4,"511081018","REFR SODA LIMONADA DIET 350ML","LT",2.738,0.0,0.0,1.0],[4,"511187350","V T CALLIA MALBEC","UN",31.35,0.0,0.0,1.0],[5,"511080001","AGUA C/ GAS 510ML","UN",1.327,0.0,0.0,32.0],[5,"511080025","AGUA H2OH! LIMONETO","UN",3.9839,0.0,0.0,11.0],[5,"511080012","AGUA S/ GAS 510ML","UN",0.9954,0.0,0.0,42.0],[5,"511080017","AGUA TONICA DIET 350ML","LT",2.9913,0.0,0.0,2.0],[5,"511188038","CERVEJA HEINNEKEN LN 355 ML","UN",6.3734,0.0,0.0,4.0],[5,"511188009","CERVEJA ORIGINAL GARRAFA","UN",8.1719,0.0,0.0,2.0],[5,"511188061","CERVEJA STELLA S/GLUTEM 330ML","UN",6.934,0.0,0.0,2.0],[5,"511081006","REFR COCA COLA  ZERO 350ML","LT",3.5171,0.0,0.0,35.0],[5,"511081003","REFR COCA COLA 350ML","LT",3.4901,0.0,0.0,7.0],[5,"511081012","REFR GUARANA 350ML","LT",2.9685,0.0,0.0,4.0],[5,"511081013","REFR GUARANA DIET 350ML","LT",3.0479,0.0,0.0,9.0],[5,"511081019","REFR SODA LIMONADA 350ML","LT",2.77,0.0,0.0,1.0],[5,"511187368","V B ANUBIS CHARDONNAY","UN",37.4027,0.0,0.0,1.0],[5,"511587043","V B DUFOULEUR MONOPOLE","UN",60.0,0.0,0.0,1.0],[5,"511187294","V R VENTISQUERO RESERVA ROSE","UN",56.6972,0.0,0.0,2.0],[5,"511187372","V T VENTISQUERO RESER CAB SAUV","UN",58.3083,0.0,0.0,1.0]],"sem":[[51,"CHOPP HEINEKEN TULIPA","CERVEJA",119.0,1309,"Chope: sai por barril/litro, não há item unitário"],[6224,"CHOPP BRAHMA 300ML","CERVEJA",96.0,1248,"Chope: sai por barril/litro, não há item unitário"],[6223,"CHOPP HEINEKEN JAZZ 400ML","CERVEJA",36.0,612,"Chope: sai por barril/litro, não há item unitário"],[3630,"VT RAMIRANA GRAN RES. CAB. SAU","VINHO/ESPUMANTE/CHAMPANHE",3.0,480,"Sem item equivalente no almoxarifado"],[6225,"CHOPP HEINEKEN ROCK 515 ML","CERVEJA",21.0,441,"Chope: sai por barril/litro, não há item unitário"],[2472,"CHOPP HEINEKEN GAROTINHO 220ML","CERVEJA",36.0,324,"Chope: sai por barril/litro, não há item unitário"],[2094,"V E  FREIXENET ROYAL BRUT","VINHO/ESPUMANTE/CHAMPANHE",1.0,190,"Sem item equivalente no almoxarifado"],[2939,"CERVEJA CORONA ZERO LONG NECK","CERVEJA",11.0,143,"Sem item equivalente no almoxarifado"],[810,"V T LIDIO CARRARO MERLOT E CABERNET","VINHO/ESPUMANTE/CHAMPANHE",1.0,120,"Sem item equivalente no almoxarifado"],[1176,"V T FACES MERLOT","VINHO/ESPUMANTE/CHAMPANHE",1.0,120,"Sem item equivalente no almoxarifado"],[2437,"GATORADE MELANCIA COM MORANGO","ENERG./GATOR./SUCO E CHA PRONT",7.0,91,"Sabor sem item no almoxarifado: conferir se entrou com outro nome"],[563,"CARB UP GEL ACAI/GUARANA","CHOCOLATE/BALA/CHICLETE",10.0,90,"Sem item equivalente no almoxarifado"],[1274,"CERVEJA STELLA ARTOIS 6 UNI","CERVEJA",1.0,55,"Sem item equivalente no almoxarifado"],[3650,"DOSE PORTO TAWNY POCAS JR","VINHO/ESPUMANTE/CHAMPANHE",1.0,45,"Sem item equivalente no almoxarifado"],[4223,"V B VESTIQUEIRO CLAS CHARD 187","VINHO/ESPUMANTE/CHAMPANHE",1.0,35,"Sem item equivalente no almoxarifado"],[2701,"GATORADE ZERO LARANJA LIMA","ENERG./GATOR./SUCO E CHA PRONT",2.0,26,"Sabor sem item no almoxarifado: conferir se entrou com outro nome"],[3975,"GATORADE FRUTAS CITRICAS","ENERG./GATOR./SUCO E CHA PRONT",1.0,13,"Sabor sem item no almoxarifado: conferir se entrou com outro nome"],[1541,"CERVEJA STELLA S/ GLUTEN LATA 330ML","CERVEJA",1.0,13,"Sem item equivalente no almoxarifado"],[21,"GATORADE MARACUJA","ENERG./GATOR./SUCO E CHA PRONT",1.0,13,"Sabor sem item no almoxarifado: conferir se entrou com outro nome"],[1203,"CHOC NESTLE CLASIC DIET","CHOCOLATE/BALA/CHICLETE",1.0,8,"Sem item equivalente no almoxarifado"]],"novos":[]};
+const CONF_MAPA = {"6":"511080012","1058":"511080025","713":"510870009","738":"510870030","722":"510870013","851":"510870038","728":"510870017","2634":"511082064","695":"511080003","11":"511081003","720":"510870012","1482":"510870055","5":"511080001","705":"510870008","1484":"510870057","1529":"511188045","1473":"511188038","1486":"510870059","18":"511082007","17":"511081006","741":"510870001","1680":"500150057","53":"511080007","37":"511080018","179":"511082014","620":"510872077","2635":"511082066","1197":"510872069","28":"511081013","23":"511082003","1832":"511188061","2237":"511443021","34":"511081018","2636":"511082065","50":"511188009","707":"510870024","38":"511080017","604":"510872031","46":"510872085","699":"510872041","167":"510872079","2521":"510870054","160":"510872093","157":"510872091","27":"511081012","508":"521492007","700":"510870006","20":"511082005","930":"511080019","392":"510872127","1":"511080006","710":"510870023","33":"511081019","2065":"511188066","719":"510870002","721":"510870003","701":"510871022","1487":"510870060","25":"511082008","731":"510871033","35":"511082012","1656":"510825054","3609":"511187379","393":"510872026","612":"510872042","162":"510872097","1942":"511188063","730":"510870016","2297":"511188075","180":"510872101","173":"510872100","724":"510870022","4221":"511187381","1790":"510872376","163":"510872094","2998":"511187368","1655":"510825053","3648":"511187310","630":"510872072","14":"511081008","1857":"500150051","600":"510872095","99":"510872086","3617":"511587067","2254":"511188069","3604":"511187294","29":"510872082","3610":"511187350","3660":"511187388","3629":"511587048","150":"510872087","26":"511082009","171":"510872080","633":"510872073","2249":"511188018","1668":"50461013","3620":"511587044","3115":"511082052","1433":"511187294","3536":"511587043","1628":"511188061","3225":"511187372","877":"511080021","1963":"510872402","2408":"511582004","2598":"511492158","2404":"511082056","2700":"511082069","1015":"510870048","1016":"510870046","1204":"510871083","1540":"511188047","702":"511492005","2599":"511492159","2232":"511443015","2631":"511581004","2228":"511443011","2406":"511082058","1944":"511082047","2405":"511082057","2308":"511532149","1235":"511187366","2306":"511532147","3636":"511187321","2250":"511188067"};
+const CONF_CATALOGO = {"511080001":["AGUA C/ GAS 510ML","UN",1.327],"511080006":["AGUA COCO KEROCOCO 1LT","LT",9.5318],"511080003":["AGUA COCO KEROCOCO 330ML","UN",3.8884],"511080007":["AGUA H2OH! LIMAO","UN",3.995],"511080025":["AGUA H2OH! LIMONETO","UN",3.9839],"511080012":["AGUA S/ GAS 510ML","UN",0.9954],"511080018":["AGUA TONICA 350ML","LT",2.9941],"511080017":["AGUA TONICA DIET 350ML","LT",2.9913],"511080019":["AGUA TONICA SCHWEPPES CITRUS","LT",3.4868],"511443021":["AMENDOIM S/ PELE 200G BRA FRUT","PT",4.7367],"511443011":["CASTANHA TORRA 200G BRA FRUTT","PT",20.4232],"511188066":["CERVEJA  CORONA LONG NECK","UN",7.3698],"511188067":["CERVEJA BECK 600ML","UN",6.9541],"511188075":["CERVEJA CERPA EXPORT LN 350ML","UN",5.5241],"511188063":["CERVEJA HEINEKEN LN SEM ALCOOL","LT",6.4642],"511188045":["CERVEJA HEINNEKEN  600 ML","UN",9.2874],"511188038":["CERVEJA HEINNEKEN LN 355 ML","UN",6.3734],"511188009":["CERVEJA ORIGINAL GARRAFA","UN",8.1719],"511188018":["CERVEJA SPATEN 600ML","UN",7.7423],"511188061":["CERVEJA STELLA S/GLUTEM 330ML","UN",6.934],"511188069":["CERVEJA STELLA S/GLUTEM 600ML","UN",8.1425],"500150051":["COCO DESCASCADO","UN",8.4],"511532147":["EMPANADA CARNE","UN",5.7],"511532149":["EMPANADA CEBOLA QUEIJO","UN",5.7],"511082003":["GATORADE LARANJA","UN",4.6657],"511082005":["GATORADE LIMAO","UN",4.6648],"511082008":["GATORADE TANGERINA","UN",4.6744],"511082009":["GATORADE UVA","UN",4.6646],"511082052":["RED BULL 250 ML","LT",8.4536],"511082047":["RED BULL TROPICAL 250ML","LT",8.3534],"511081006":["REFR COCA COLA  ZERO 350ML","LT",3.5171],"511081003":["REFR COCA COLA 350ML","LT",3.4901],"511081008":["REFR FANTA LARANJA 350ML","LT",2.941],"511081012":["REFR GUARANA 350ML","LT",2.9685],"511081013":["REFR GUARANA DIET 350ML","LT",3.0479],"511081019":["REFR SODA LIMONADA 350ML","LT",2.77],"511081018":["REFR SODA LIMONADA DIET 350ML","LT",2.738],"510872069":["SORVETE KIBON BRIGADEIRO","UN",6.7859],"510872031":["SORVETE KIBON CHICABON","UN",6.8247],"510872042":["SORVETE KIBON CORNETO CROCANTE","UN",8.2839],"510872077":["SORVETE KIBON MINI ESKI-BON","UN",10.6067],"510872101":["SORVETE ROCHINHA UVA","UN",6.5587],"511082012":["SUCO DEL VALLE PESSEGO","LT",3.6081],"511082014":["SUCO DEL VALLE UVA","LT",3.6291],"511187368":["V B ANUBIS CHARDONNAY","UN",37.4027],"511187379":["V B CALLIA TORRONTES","UN",42.75],"511187366":["V B LIDIO CARRARO CHARDO 187ML","UN",18.1247],"511187388":["V T ANUBIS RED BLEND","UN",40.9667],"511187310":["V T ARG ANUBIS MALBEC SUSANA BALBO","UN",35.8513],"511187350":["V T CALLIA MALBEC","UN",31.35],"511187321":["V T CEST LA VIE PINOT SYRAH","UN",79.24],"511587048":["VT RAMIRANA RESERVA CARMENERE","UN",74.265],"510825053":["BANANINHA CRISTAL","UN",1.4509],"510825054":["BANANINHA ZERO","UN",1.4812],"510870001":["BOMBOM FERRERO ROCHER","UN",9.5388],"510870002":["BOMBOM OURO BRANCO","UN",1.2151],"510870003":["BOMBOM SONHO VALSA","UN",1.2056],"511082064":["CHA VERDE YAI LARANJA GENGIBRE","LT",4.0371],"511082065":["CHA VERDE YAI LICHIA","LT",4.0492],"511082066":["CHA VERDE YAI LIMAO HORTELA","LT",4.0202],"510870006":["CHOC ALPINO","UN",2.046],"510870038":["CHOC BATOM GAROTO","UN",1.477],"510870008":["CHOC CHOKITO (CX 30)","UN",2.5779],"510870054":["CHOC DIAMANTE NEGRO","UN",2.4245],"510870055":["CHOC KIT KAT","UN",3.4996],"510870009":["CHOC LAKA","UN",2.4245],"510870012":["CHOC PRESTIGIO","UN",2.5845],"510870057":["CHOC SNICKERS","UN",3.2552],"510870013":["CHOC SULFLAIR (CX 20)","UN",4.9079],"510870016":["CHOC TWIX","UN",1.1365],"500150057":["COCO VERDE","UN",3.8087],"510870017":["CONFEITO CHOC M&M","UN",4.0074],"510870059":["CONFEITO SKITTLES","UN",2.9255],"510870022":["CONFEITO TIC TAC","PT",2.2215],"510870060":["DOCE LEITE PINGO","UN",0.7933],"510870023":["DROPS FRUIT TELLA (CX 15","UN",2.356],"510870024":["DROPS HALLS (CX 21)","UN",1.2814],"510870030":["DROPS MENTOS MENTA","UN",2.13],"511082007":["GATORADE MORANGO MARACUJA","UN",4.6635],"510871022":["GOMA MASCAR TUBO","UN",0.5922],"510871033":["PACOQUITA SANTA HELENA","UN",0.5177],"521492007":["PAO QUEIJO UNIDADE","UN",2.5275],"510872127":["SORVETE KIBON FRUTARE LIMAO","UN",5.3254],"510872026":["SORVETE KIBON FRUTARE UVA","UN",5.2456],"510872073":["SORVETE KIBON MAGNUM CHC. BRAN","UN",13.5979],"510872072":["SORVETE KIBON MAGNUM CLASSICO","UN",11.592],"510872041":["SORVETE KIBON TABLITO","UN",7.2188],"510872079":["SORVETE ROCHINHA  MELANCIA","UN",6.4297],"510872080":["SORVETE ROCHINHA ABACATE","UN",7.65],"510872082":["SORVETE ROCHINHA ACAI GUARANA","UN",6.5402],"510872085":["SORVETE ROCHINHA BLUE ICE","UN",5.5598],"510872086":["SORVETE ROCHINHA CHOCOLATE","UN",7.6389],"510872087":["SORVETE ROCHINHA COCO BRANCO","UN",7.834],"510872376":["SORVETE ROCHINHA COCO BRANCO Z","UN",8.2943],"510872091":["SORVETE ROCHINHA GROSELHA","UN",5.6545],"510872093":["SORVETE ROCHINHA LIMAO","UN",6.5618],"510872094":["SORVETE ROCHINHA MARACUJA","UN",6.6094],"510872095":["SORVETE ROCHINHA MILHO VERDE","UN",7.5912],"510872097":["SORVETE ROCHINHA MORANGO","UN",7.6508],"510872100":["SORVETE ROCHINHA TANGERINA","UN",6.4567],"511587044":["V B BONS VENTOS BRANCO","UN",47.1267],"511587043":["V B DUFOULEUR MONOPOLE","UN",60.0],"511187294":["V R VENTISQUERO RESERVA ROSE","UN",56.6972],"511187381":["V T CALLIA MALBEC 375ML","UN",28.822],"50461013":["V T CHAUTEAU JAMIN 2021","GF",70.0],"511187372":["V T VENTISQUERO RESER CAB SAUV","UN",58.3083],"511587067":["VB CEST LA VIE BLANC","UN",79.73],"511080021":["AGUA S/ GAS 510ML FITNESS","UN",1.3757],"510870046":["BARRA MIXED NUTS ORIGINAL","UN",3.4772],"510870048":["BARRA MIXED SEMENTES","UN",3.491],"511492005":["BATATA RUFLES 68GR","PT",5.4223],"511188047":["CERVEJA HEINEKEN LATA 350ML","LT",5.1999],"511581004":["ENERGETICO MONSTER 473ml","UN",7.8946],"511082069":["GATORADE ZERO FRUTAS SILVESTRE","UN",2.6623],"511082056":["ISOTONICO POWERADE FRUTAS TROP","UN",3.4321],"511082058":["ISOTONICO POWERADE LARANJA","UN",3.4321],"511082057":["ISOTONICO POWERADE LIMAO","UN",3.6087],"511582004":["ISOTONICO POWERADE MOUNTAIN","UN",3.4321],"511443015":["MIX AMENDOIM 200G BRA FRUTT","PT",5.562],"510871083":["PACOCA SANTA HELENA DIET","UN",1.3921],"510872402":["PAO DE MEL DOCE DE LEITE","UN",6.9846],"511492158":["SUPLE ALIM YOPRO CHOC 15G","KG",6.79],"511492159":["SUPLE ALIM YOPRO MORANGO 15G","KG",6.7882]};
+const CONF_INV_BASE = {"2026-09-30":{"data":"2026-09-30","arquivo":"Inventario_PDVS_300926.xls","por":"carga inicial","em":"2026-10-21T18:19:00.000Z","linhas":[["511543068","DAMASCO",342.0,"PEDACO DE BOLO","UN",6.643684],["521492007","DAMASCO",12.0,"PAO QUEIJO UNIDADE","UN",2.53333],["511532085","DAMASCO",2.0,"PAO QUEIJO MINI C/ 5 UNID","UN",18.525],["511532176","DAMASCO",46.0,"CROISSANT","UN",4.90087],["511532177","DAMASCO",59.0,"FOCACCIA PERU E QUEIJOS","UN",16.422373],["511532178","DAMASCO",70.0,"FOCACCIA CAPRESE PESTO","UN",12.310429],["511532186","DAMASCO",10.0,"TORTINHA DE PALMITO","UN",10.0],["511492046","DAMASCO",202.0,"TAMARA S/ CAROCO","KG",7.460396],["521492004","DAMASCO",56.0,"MINI PAO DE QUEIJO","KG",33.906512],["511080001","DAMASCO",15.0,"AGUA C/ GAS 510ML","UN",1.310196],["511080012","DAMASCO",10.0,"AGUA S/ GAS 510ML","UN",0.943322],["511081003","DAMASCO",8.0,"REFR COCA COLA 350ML","LT",3.492695],["511081006","DAMASCO",6.0,"REFR COCA COLA  ZERO 350ML","LT",3.508331],["511081012","DAMASCO",14.0,"REFR GUARANA 350ML","LT",2.987745],["511081013","DAMASCO",7.0,"REFR GUARANA DIET 350ML","LT",3.025661],["511524131","DAMASCO",31.0,"DOCE TAMARA","UN",5.0],["50471006","DAMASCO",86.0,"BROWNIE SALA DAMASCO","UN",1.841512],["50471119","DAMASCO",1034.0,"BROWNIE SALA DAMASCO","UN",3.358859],["510871067","DAMASCO",101.0,"PALHA ITALIANA","UN",11.0],["50471095","DAMASCO",28.0,"MAMOUL SALA DAMASCO","UN",7.5],["50471096","DAMASCO",106.0,"CHOCOLATE CASA LASEVICIUS","UN",16.297075],["510871199","DAMASCO",40.0,"DOCE CHOCOLATE DUBAI","UN",13.0],["533096158","DAMASCO",4.0,"ALCOOL LIQUIDO 70º INPM","UN",7.200193],["533096223","DAMASCO",4.0,"GUARDANAPO 24X24 PERSON C/100","PT",3.196932],["501290011","DAMASCO",64.0,"CAPSULAS CAFE TRES CAPUCC HAVA","UN",1.989775],["501290012","DAMASCO",42.0,"CAPSULAS CAFE TRES ESPRE AMENO","UN",1.969459],["501290013","DAMASCO",67.0,"CAPSULAS CAFE TRES ESPRE DESCA","UN",1.960849],["501290014","DAMASCO",30.0,"CAPSULAS CAFE TRES ESPRE FORZA","UN",1.95539],["501290016","DAMASCO",31.0,"CAPSULAS CAFE TRES ESPRE SUPRE","UN",1.957551],["501290017","DAMASCO",59.0,"CAPSULAS CAFE TRES ESPRE VIBRA","UN",1.970787],["501290018","DAMASCO",134.0,"CAPSULAS CHA MISTO HIBIS/ LARA","UN",2.119604],["501290020","DAMASCO",55.0,"CAPSULAS TRES CHOCOLATTO","UN",2.764727],["501290026","DAMASCO",51.0,"CAPSULAS CAFE TRES ESPRE CLASS","UN",1.951723],["501290027","DAMASCO",74.0,"CAPSULAS CAFE TRES LATTE MACCH","UN",1.94899],["501290028","DAMASCO",41.0,"CAPSULAS SUPREMO MACCHI BAILEY","UN",1.981705],["501290029","DAMASCO",66.0,"CAPSULAS CAFE CHOCOLA CARAMELO","UN",2.76471],["501290030","DAMASCO",79.0,"CAPSULAS CHA VERDE C/ LIMAO","UN",1.94931],["511492018","COZINHA CENTRAL",3.0,"NOZES S/ CASCA","KG",54.074242],["511492066","COZINHA CENTRAL",3.0,"BISCOITO MAIZENA","PT",4.241622],["510872361","COZINHA CENTRAL",1.0,"CREME AVELA NUTELLA 650GR","UN",45.317222],["510871200","COZINHA CENTRAL",2.0,"GOIABADA CREMOSA RALSTON 1KG","UN",18.048889],["510664004","COZINHA CENTRAL",2.5,"AZEITE EXTRA VIRGEM ANDORINHA","ML",26.008781],["510975002","COZINHA CENTRAL",9.0,"IOGURTE NATURAL 200ML","UN",3.547684],["533096022","COZINHA CENTRAL",2.0,"COPO DESC. 180ML COPAZA C/25P","PT",5.7],["533096067","COZINHA CENTRAL",11.0,"PAPEL TOALHA BOBINA GOOD 200M","UN",14.99936],["533096158","COZINHA CENTRAL",5.0,"ALCOOL LIQUIDO 70º INPM","UN",7.200193],["533096285","COZINHA CENTRAL",6.0,"LUVA NITRILICA PRETA M","UN",0.625017],["533096299","COZINHA CENTRAL",5.0,"LUVA NITRILICA PRETA G","UN",0.625002],["533096303","COZINHA CENTRAL",2.0,"LUVA NITRILICA PRETA P","UN",0.625],["500150016","COZINHA CENTRAL",1.666,"LARANJA PERA","KG",2.491051],["500150018","COZINHA CENTRAL",21.14,"LIMAO","KG",8.919175],["500150024","COZINHA CENTRAL",14.96,"MARACUJA","KG",12.474197],["500150045","COZINHA CENTRAL",1858.0,"LIMAO SICILIANO","KG",8.054067],["500151065","COZINHA CENTRAL",1.0,"GENGIBRE MOIDO","KG",44.063333],["500151066","COZINHA CENTRAL",2.0,"CEBOLA EM PO","KG",36.6425],["500255004","COZINHA CENTRAL",15.0,"CAPA FILE BOVINA","KG",31.221013],["500255012","COZINHA CENTRAL",35.0,"FILE MIGNON BOVINO SEM CORDAO","KG",105.487583],["500255015","COZINHA CENTRAL",6.0,"LAGARTO BOVINO","KG",32.775772],["500255017","COZINHA CENTRAL",20.0,"MIOLO ALCATRA BOVINO","KG",43.307266],["500255021","COZINHA CENTRAL",35.0,"PATINHO BOVINO","KG",43.548811],["500258034","COZINHA CENTRAL",5.0,"FILE SAINT PETER 150/200 CONGE","KG",47.68],["500258035","COZINHA CENTRAL",4.0,"FILE SALMON FRESCO 1.800KG","KG",73.890821],["500257014","COZINHA CENTRAL",14.0,"FILE COXA E SOBRECOXAS","KG",11.407865],["500257015","COZINHA CENTRAL",30.0,"FILE FRANGO","KG",14.748952],["500361004","COZINHA CENTRAL",10.0,"ARROZ TIPO 1 PRIMEIRA LINHA","KG",4.757426],["500361008","COZINHA CENTRAL",8.0,"GRAO DE BICO","KG",17.918746],["500361009","COZINHA CENTRAL",0.5,"LENTILHA","KG",19.233846],["500563006","COZINHA CENTRAL",5.0,"AZEITONA VERDE S/ CAROSO","KG",34.917273],["500563016","COZINHA CENTRAL",1.0,"PALMITO PICADO PUPUNHA 3090G","UN",47.694],["500664004","COZINHA CENTRAL",3.0,"CALDO KNOR CARNE 1KG","KG",18.08087],["500664005","COZINHA CENTRAL",3.0,"CALDO KNOR GALINHA 1KG","KG",18.490347],["500664006","COZINHA CENTRAL",0.5,"COMINHO EM  PO","KG",14.265],["500664008","COZINHA CENTRAL",0.5,"CURRY","PT",3.62],["500664015","COZINHA CENTRAL",1.0,"OREGANO","KG",26.421538],["500664017","COZINHA CENTRAL",1.0,"PAPRICA DOCE","KG",18.620606],["500664018","COZINHA CENTRAL",1.0,"PIMENTA DO REINO EM  PO","KG",58.04],["500664020","COZINHA CENTRAL",0.4,"PIMENTA DO REINO EM GRAO PRETA","KG",99.7],["500664024","COZINHA CENTRAL",3.0,"PIMENTA SIRIA ZENNY","KG",98.955],["500664026","COZINHA CENTRAL",5.0,"SAL REFINADO","KG",2.238997],["500664028","COZINHA CENTRAL",2.0,"ZAATAR PURO","KG",94.585834],["500664047","COZINHA CENTRAL",1.0,"PAPRICA DEFUMADA","KG",22.8],["500664050","COZINHA CENTRAL",1.0,"PIMENTA CALABRESA SECA","KG",41.38],["500664053","COZINHA CENTRAL",0.5,"PIMENTA DO REINO BRANCA PO","KG",62.415],["500664055","COZINHA CENTRAL",0.5,"COENTRO EM PO","KG",22.165],["500765022","COZINHA CENTRAL",0.75,"MASSA FOLHADA  FILO","KG",31.350222],["500765033","COZINHA CENTRAL",14.0,"MASSA PASTEL REDONDA","UN",3.657611],["500870002","COZINHA CENTRAL",2.0,"CHOCOLATE PO NESTLE 50%","KG",75.992633],["500870003","COZINHA CENTRAL",0.24,"CHOCOLATE GRANULADO","KG",25.665984],["500870004","COZINHA CENTRAL",6.0,"CHOCOLATE MEIO AMARGO BARRA","KG",83.709541],["500870008","COZINHA CENTRAL",5.0,"CHOCOLATE GRANULADO GOUMET","KG",102.25],["50781023","COZINHA CENTRAL",0.5,"CHOCOLATE PO 100% CACAU","KG",99.94],["501492179","COZINHA CENTRAL",6.0,"OLEO ALGODAO","LT",9.576539],["500563027","COZINHA CENTRAL",8.0,"MILHO VERDE EM CONSERVA 200G","UN",2.785909],["501492005","COZINHA CENTRAL",1.0,"ACUCAR MASCAVO","KG",15.623333],["501492006","COZINHA CENTRAL",19.0,"ACUCAR REFINADO","KG",3.167208],["501492009","COZINHA CENTRAL",1.0,"AMEIXA SECA S/ CAROCO","KG",36.821429],["501492016","COZINHA CENTRAL",1.0,"CANELA PAU","KG",46.62],["501492017","COZINHA CENTRAL",1.0,"CANELA PO PURA","KG",14.984],["501492026","COZINHA CENTRAL",1.0,"DAMASCO TURCO DOCE SECO","KG",99.96],["501492031","COZINHA CENTRAL",0.5,"FERMENTO BIOLOGICO FRESCO","KG",25.213362],["501492033","COZINHA CENTRAL",20.0,"FOLHA UVA","KG",30.0],["501492041","COZINHA CENTRAL",7.0,"LEITE CONDENSADO MOCA 2600GR","LT",71.183412],["501492043","COZINHA CENTRAL",5.0,"LEITE COCO 500ML","UN",22.361875],["501492044","COZINHA CENTRAL",4.5,"MAIZENA 1KG","CX",21.217632],["501492053","COZINHA CENTRAL",0.5,"NOZ MOSCADA MOIDO","KG",72.565],["501492068","COZINHA CENTRAL",3.0,"UVA PASSA PRETA","KG",19.00625],["501492070","COZINHA CENTRAL",4.0,"AVEIA FLOCOS","KG",21.723333],["501492074","COZINHA CENTRAL",5.0,"VINAGRE BRANCO 750ML","UN",2.215769],["501492103","COZINHA CENTRAL",1.0,"BICARBONATO SODIO","LT",10.797143],["501492151","COZINHA CENTRAL",2.0,"MEL SILVESTRE","UN",48.087222],["501492162","COZINHA CENTRAL",2.0,"COCO RALADO FRESCO","KG",31.11],["501492169","COZINHA CENTRAL",3.4,"EXTRATO TOMATE 1 LINHA  1,7KG","LT",24.321042],["507101010","COZINHA CENTRAL",11.0,"FERMENTO QUIMICO","KG",32.432432],["507101133","COZINHA CENTRAL",4.0,"ACUCAR IMPALPAVEL","KG",13.29],["500462005","COZINHA CENTRAL",28.0,"FARINHA TRIGO","KG",4.652926],["500462007","COZINHA CENTRAL",7.7,"FUBA MIMOSO","KG",4.921273],["500462014","COZINHA CENTRAL",6.0,"FARINHA EMPANAR PANCO","KG",15.962297],["500462022","COZINHA CENTRAL",15.0,"TRIGO KIBE CLARO FINO","KG",20.66657],["507151118","COZINHA CENTRAL",1.0,"LEITE EM PO","KG",39.9],["500975003","COZINHA CENTRAL",17.0,"LEITE INTEGRAL","UN",5.895733],["500975006","COZINHA CENTRAL",4.5,"CREME LEITE FRESCO","UN",45.37819],["500975007","COZINHA CENTRAL",7.0,"CREME LEITE LATA","LT",8.63],["500977002","COZINHA CENTRAL",7.0,"MANTEIGA S/ SAL","KG",27.507213],["500977003","COZINHA CENTRAL",12.0,"MARGARINA 15 KG","LT",152.777968],["521290001","CARTEADO",1.0,"CAFE GRAO","KG",100.03339],["521290002","CARTEADO",2.0,"CHA CAMOMILA","CX",6.054516],["521290003","CARTEADO",3.0,"CHA CIDREIRA","CX",5.905143],["521290004","CARTEADO",1.0,"CHA ERVA DOCE","CX",6.145625],["511492030","CARTEADO",0.5,"ACUCAR SACHET UNIAO C/336X8GR","CX",17.27619],["511492076","CARTEADO",0.5,"ADOCANTE SACHE LINEA SUCRALOSE","CX",54.351892],["511080001","CARTEADO",45.0,"AGUA C/ GAS 510ML","UN",1.310196],["511080007","CARTEADO",2.0,"AGUA H2OH! LIMAO","UN",4.026294],["511080012","CARTEADO",38.0,"AGUA S/ GAS 510ML","UN",0.943322],["511080017","CARTEADO",1.0,"AGUA TONICA DIET 350ML","LT",3.001332],["511080018","CARTEADO",3.0,"AGUA TONICA 350ML","LT",2.994153],["511080025","CARTEADO",4.0,"AGUA H2OH! LIMONETO","UN",4.02047],["511081003","CARTEADO",9.0,"REFR COCA COLA 350ML","LT",3.492695],["511081006","CARTEADO",29.0,"REFR COCA COLA  ZERO 350ML","LT",3.508331],["511081012","CARTEADO",3.0,"REFR GUARANA 350ML","LT",2.987745],["511081013","CARTEADO",1.0,"REFR GUARANA DIET 350ML","LT",3.025661],["511081018","CARTEADO",1.0,"REFR SODA LIMONADA DIET 350ML","LT",2.77502],["511081019","CARTEADO",5.0,"REFR SODA LIMONADA 350ML","LT",2.762397],["511188009","CARTEADO",10.0,"CERVEJA ORIGINAL GARRAFA","UN",8.28662],["511188038","CARTEADO",16.0,"CERVEJA HEINNEKEN LN 355 ML","UN",6.430168],["511188045","CARTEADO",9.0,"CERVEJA HEINNEKEN  600 ML","UN",9.287976],["533096059","CARTEADO",0.5,"PALITO DE DENTE GINA C/ 5000","CX",13.0],["533096223","CARTEADO",25.0,"GUARDANAPO 24X24 PERSON C/100","PT",3.196932],["500870002","CARTEADO",2.0,"CHOCOLATE PO NESTLE 50%","KG",75.992633],["501290001","CARTEADO",1.0,"CAFE PO EXTRA FORTE","KG",44.701802],["501290013","CARTEADO",30.0,"CAPSULAS CAFE TRES ESPRE DESCA","UN",1.960849],["501290025","CARTEADO",20.0,"CAPSULAS CAFE TRES ESPRE PLENO","UN",1.950088],["533096413","CARTEADO",350.0,"MEXEDOR DE BAMBU 11CM EMBALADO","UN",0.033793],["500975003","CARTEADO",18.0,"LEITE INTEGRAL","UN",5.895733],["510872419","ACADEMIA",7.0,"ACAI POTE 220GR C/ GRANOLA","UN",7.361957],["510872428","ACADEMIA",8.0,"ACAI POTE 220GR C/ LEITE","UN",8.034222],["511582009","ACADEMIA",7.0,"ISOTONICO POWERADE LIMAO","UN",3.49],["511543077","ACADEMIA",1000.0,"EMBALAGEM S10 MESA","UN",0.64],["500150021","ACADEMIA",10.0,"MAMAO FORMOSA","KG",5.603242],["521492007","ACADEMIA",256.0,"PAO QUEIJO UNIDADE","UN",2.53333],["511543021","ACADEMIA",3.0,"ADICAO WHEY PROTEIN","UN",134.043333],["511522074","ACADEMIA",84.0,"CAFE NESPRESSO RISTRETO","UN",3.05],["521290001","ACADEMIA",4.0,"CAFE GRAO","KG",100.03339],["521290003","ACADEMIA",1.0,"CHA CIDREIRA","CX",5.905143],["521290005","ACADEMIA",1.0,"CHA HORTELA","CX",6.018571],["521290006","ACADEMIA",1.0,"CHA MACA","UN",8.491818],["521290009","ACADEMIA",1.0,"CHA PRETO","UN",3.29],["521290032","ACADEMIA",5.0,"CHA MATE LEAO NATURAL 300ML","UN",2.572174],["511082064","ACADEMIA",2.0,"CHA VERDE YAI LARANJA GENGIBRE","LT",4.0371],["511082065","ACADEMIA",23.0,"CHA VERDE YAI LICHIA","LT",4.049349],["511082066","ACADEMIA",8.0,"CHA VERDE YAI LIMAO HORTELA","LT",4.020246],["510872002","ACADEMIA",10.0,"ACAI NATURAL","KG",15.832906],["500150006","ACADEMIA",8.0,"BANANA NANICA","KG",3.519306],["511492042","ACADEMIA",1.0,"GRANOLA TRADICIONAL","KG",20.463077],["511492044","ACADEMIA",1.0,"SEMENTE LINHACA","KG",11.9],["511492060","ACADEMIA",1.0,"ACUCAR SACHET MASCAVO 6GR","CX",22.597778],["511492076","ACADEMIA",1.0,"ADOCANTE SACHE LINEA SUCRALOSE","CX",54.351892],["521492017","ACADEMIA",5.0,"POLPA DE FRUTA ACEROLA 100G","UN",1.695],["511492005","ACADEMIA",9.0,"BATATA RUFLES 68GR","PT",5.422523],["511443015","ACADEMIA",4.0,"MIX AMENDOIM 200G BRA FRUTT","PT",5.562],["511443021","ACADEMIA",6.0,"AMENDOIM S/ PELE 200G BRA FRUT","PT",4.736667],["511443011","ACADEMIA",9.0,"CASTANHA TORRA 200G BRA FRUTT","PT",20.423077],["511492008","ACADEMIA",6.0,"CATCHUP HEINZ 397GR","LT",12.942432],["511492017","ACADEMIA",4.0,"MOSTARDA HEINZ 255GR","LT",11.56],["511492158","ACADEMIA",7.0,"SUPLE ALIM YOPRO CHOC 15G","KG",6.79],["511492159","ACADEMIA",8.0,"SUPLE ALIM YOPRO MORANGO 15G","KG",6.789029],["510767007","ACADEMIA",2.0,"PAO FORMA C/ CASCA WICK BOLD","PT",6.500702],["510767028","ACADEMIA",2.0,"PAO INTEGRAL WICK BOLD","PT",7.550186],["511080001","ACADEMIA",45.0,"AGUA C/ GAS 510ML","UN",1.310196],["511080003","ACADEMIA",63.0,"AGUA COCO KEROCOCO 330ML","UN",4.034871],["511080006","ACADEMIA",18.0,"AGUA COCO KEROCOCO 1LT","LT",9.53181],["511080007","ACADEMIA",25.0,"AGUA H2OH! LIMAO","UN",4.026294],["511080012","ACADEMIA",76.0,"AGUA S/ GAS 510ML","UN",0.943322],["511080017","ACADEMIA",4.0,"AGUA TONICA DIET 350ML","LT",3.001332],["511080018","ACADEMIA",9.0,"AGUA TONICA 350ML","LT",2.994153],["511080021","ACADEMIA",51.0,"AGUA S/ GAS 510ML FITNESS","UN",1.375657],["511080025","ACADEMIA",12.0,"AGUA H2OH! LIMONETO","UN",4.02047],["511582013","ACADEMIA",12.0,"GATORADE ZERO FRUTAS SILVESTRE","UN",7.0],["511581004","ACADEMIA",3.0,"ENERGETICO MONSTER 473ml","UN",7.894545],["511081003","ACADEMIA",36.0,"REFR COCA COLA 350ML","LT",3.492695],["511081006","ACADEMIA",29.0,"REFR COCA COLA  ZERO 350ML","LT",3.508331],["511081008","ACADEMIA",4.0,"REFR FANTA LARANJA 350ML","LT",2.945082],["511081012","ACADEMIA",11.0,"REFR GUARANA 350ML","LT",2.987745],["511081013","ACADEMIA",16.0,"REFR GUARANA DIET 350ML","LT",3.025661],["511081018","ACADEMIA",7.0,"REFR SODA LIMONADA DIET 350ML","LT",2.77502],["511081019","ACADEMIA",6.0,"REFR SODA LIMONADA 350ML","LT",2.762397],["511082003","ACADEMIA",27.0,"GATORADE LARANJA","UN",4.606784],["511082005","ACADEMIA",17.0,"GATORADE LIMAO","UN",4.664653],["511082007","ACADEMIA",12.0,"GATORADE MORANGO MARACUJA","UN",4.588146],["511082008","ACADEMIA",33.0,"GATORADE TANGERINA","UN",4.674396],["511082047","ACADEMIA",2.0,"RED BULL TROPICAL 250ML","LT",8.386699],["511082052","ACADEMIA",12.0,"RED BULL 250 ML","LT",8.474028],["511082012","ACADEMIA",14.0,"SUCO DEL VALLE PESSEGO","LT",3.608081],["511082014","ACADEMIA",31.0,"SUCO DEL VALLE UVA","LT",3.628535],["511188009","ACADEMIA",52.0,"CERVEJA ORIGINAL GARRAFA","UN",8.28662],["511188098","ACADEMIA",26.0,"CERVEJA STELLA LONG NECK 330ML","ML",6.450386],["511188038","ACADEMIA",35.0,"CERVEJA HEINNEKEN LN 355 ML","UN",6.430168],["511188045","ACADEMIA",61.0,"CERVEJA HEINNEKEN  600 ML","UN",9.287976],["511188047","ACADEMIA",58.0,"CERVEJA HEINEKEN LATA 350ML","LT",5.199901],["511188063","ACADEMIA",2.0,"CERVEJA HEINEKEN LN SEM ALCOOL","LT",6.464263],["510872017","ACADEMIA",2.0,"COBERTURA P/ SORV  CHOCOLATE","LT",38.211053],["510871083","ACADEMIA",23.0,"PACOCA SANTA HELENA DIET","UN",1.392213],["510871033","ACADEMIA",23.0,"PACOQUITA SANTA HELENA","UN",0.517648],["510825053","ACADEMIA",7.0,"BANANINHA CRISTAL","UN",1.450851],["510825054","ACADEMIA",23.0,"BANANINHA ZERO","UN",1.481148],["510870002","ACADEMIA",18.0,"BOMBOM OURO BRANCO","UN",1.215067],["510870003","ACADEMIA",31.0,"BOMBOM SONHO VALSA","UN",1.20555],["510870023","ACADEMIA",23.0,"DROPS FRUIT TELLA (CX 15","UN",2.358393],["510870030","ACADEMIA",18.0,"DROPS MENTOS MENTA","UN",2.136593],["510870047","ACADEMIA",8.0,"BARRA MIXED NOZES E CANELA","UN",3.421824],["510870048","ACADEMIA",10.0,"BARRA MIXED SEMENTES","UN",3.491111],["510870051","ACADEMIA",11.0,"BARRA MIXED NUT COCO","UN",3.444808],["510871089","ACADEMIA",3.0,"BARRA WHEY BAR MORANGO CHOCOLATE","UN",5.29],["510872402","ACADEMIA",9.0,"PAO DE MEL DOCE DE LEITE","UN",6.984706],["510871196","ACADEMIA",12.0,"BARRA WHEY BAR PISTACHE","UN",5.49],["510871197","ACADEMIA",9.0,"BARRA WHEY BAR COCADA","UN",5.49],["510871198","ACADEMIA",7.0,"BARRA WHEY BAR CHOCOL BRANCO","UN",5.0365],["510871050","ACADEMIA",1.0,"BARRA WHEY BAR COOKIES","UN",5.262812],["510664003","ACADEMIA",2.0,"MOLHO PIMENTA TABASCO","UN",20.937059],["510664004","ACADEMIA",1.0,"AZEITE EXTRA VIRGEM ANDORINHA","ML",26.008781],["510975002","ACADEMIA",4.0,"IOGURTE NATURAL 200ML","UN",3.547684],["533095091","ACADEMIA",2.0,"GRAMPO P/ GRAMPEADOR 26/6","CX",7.311111],["533095127","ACADEMIA",2.0,"TESOURA DE COSTURA","UN",13.126364],["533095052","ACADEMIA",2.0,"COMUNICACAO INTERNA","BL",25.090889],["533095023","ACADEMIA",10.0,"BOBINA TERMICA 80X40 1 VIA","RL",4.766987],["533095176","ACADEMIA",1.0,"CLIPS P/ PAPEL 8/0","CX",12.762857],["533095001","ACADEMIA",2.0,"CANETA MARCA TEXTO AMARELA","UN",2.052353],["533095028","ACADEMIA",5.0,"CANETA BIC CRISTAL AZUL","UN",0.926798],["533095049","ACADEMIA",1.0,"CLIPS P/ PAPEL 2/0","CX",12.3225],["533096023","ACADEMIA",1.0,"COPO DESC. 300 ML COPAZA C/20P","PT",8.912514],["533096028","ACADEMIA",1.0,"DETERGENTE NEUTRO YPE 5L","GL",23.000545],["533096032","ACADEMIA",11.0,"ESPONJA DUPLA FACE 3M","UN",2.0],["533096035","ACADEMIA",1.0,"FILME DE PVC 60CM","RL",124.0],["533096057","ACADEMIA",1.0,"PA DE LIXO","UN",31.333],["533096060","ACADEMIA",1.0,"PALITO DE DENTE SACHET","CX",14.07],["533096063","ACADEMIA",1.0,"PANO MULTI-USO OBER LIMP 300M","RL",114.0],["533096064","ACADEMIA",9.0,"PAPEL ALUMINIO 30X7,5CM","RL",3.1],["533096084","ACADEMIA",3.0,"SACO P/ HAMBURGER GDE C/500","PT",22.8],["533096086","ACADEMIA",1.0,"SACO PLAS.TRANSP 35X45 C/ 500U","PT",98.8],["533096101","ACADEMIA",1.0,"COLHER PLAST. TRANSP C/ 1000UN","CX",72.0],["533096104","ACADEMIA",1.0,"FACA REFEICAO TRANSP C/ 1000U","CX",71.8775],["533096105","ACADEMIA",1.0,"GARFO REFEICAO TRANSP C/ 1000U","CX",73.0],["533096106","ACADEMIA",13.0,"PRATO CRISTAL REFEIC 22CM 10UN","PT",22.899783],["533096158","ACADEMIA",4.0,"ALCOOL LIQUIDO 70º INPM","UN",7.200193],["533096161","ACADEMIA",1.0,"VASSOURA NOVICA","UN",16.6],["533096162","ACADEMIA",2.0,"BORRIFADOR","UN",6.7],["533096192","ACADEMIA",1.0,"DETERGENTE CLORADO 5 LT","GL",78.999333],["533096223","ACADEMIA",21.0,"GUARDANAPO 24X24 PERSON C/100","PT",3.196932],["533096257","ACADEMIA",1000.0,"CANUDO BIO FLEX TRANSP 6MM","UN",0.119911],["533096274","ACADEMIA",1000.0,"FACA L. PREMIUM SILVER PLASTIC","UN",0.837529],["533096275","ACADEMIA",1500.0,"GARFO L. PREMIUM SILVER PLASTI","UN",0.8361],["533096276","ACADEMIA",2500.0,"COLHER L. PREMIUM SILVER PLAST","UN",0.80663],["533096285","ACADEMIA",300.0,"LUVA NITRILICA PRETA M","UN",0.625017],["533096299","ACADEMIA",200.0,"LUVA NITRILICA PRETA G","UN",0.625002],["533096357","ACADEMIA",100.0,"COPO PET CRISTAL 400ML","UN",1.00031],["533096359","ACADEMIA",600.0,"TAMPA COPO BOLHA C/ FURO","UN",0.17],["533096360","ACADEMIA",2250.0,"TAMPA COPOS S/ FURO LISA 400ML","UN",0.139852],["533096363","ACADEMIA",100.0,"COPO PAPEL BRANCO 200ML PAREDE SIMPLES","UN",0.499358],["533096364","ACADEMIA",2050.0,"TAMPA COPO DE CAFE PRETA 200ML","UN",0.1593],["533096366","ACADEMIA",25.0,"COPO PET CRISTAL 440ML","UN",0.612415],["533096375","ACADEMIA",300.0,"COPO PAPEL BRANCO 270ML","UN",0.368286],["533096376","ACADEMIA",400.0,"TAMPA COPO DE CAFE PRETA 270ML","UN",0.208185],["500150001","ACADEMIA",6.0,"ABACAXI","KG",8.040858],["500150016","ACADEMIA",20.0,"LARANJA PERA","KG",2.491051],["500150018","ACADEMIA",6.0,"LIMAO","KG",8.919175],["500150025","ACADEMIA",20.0,"MELANCIA","KG",2.805037],["500259025","ACADEMIA",0.5,"PEITO PERU DEFUMADO","KG",44.325926],["500259028","ACADEMIA",1.2,"PRESUNTO COZIDO S/ GORDURA","KG",19.12436],["500664037","ACADEMIA",2.0,"SAL SACHE CISNE","CX",25.764286],["500870002","ACADEMIA",2.0,"CHOCOLATE PO NESTLE 50%","KG",75.992633],["501290005","ACADEMIA",99.0,"CAFE SACHET RISTRETTO","UN",3.048866],["501290006","ACADEMIA",77.0,"CAFE SACHET  DESCAFEINADO","UN",3.043891],["501290007","ACADEMIA",83.0,"CAFE SACHET LEGGERO","UN",3.039587],["501492017","ACADEMIA",1.0,"CANELA PO PURA","KG",14.984],["501492070","ACADEMIA",1.0,"AVEIA FLOCOS","KG",21.723333],["501492072","ACADEMIA",60.0,"OVO BRANCO","UN",0.609975],["501492151","ACADEMIA",1.0,"MEL SILVESTRE","UN",48.087222],["533096413","ACADEMIA",500.0,"MEXEDOR DE BAMBU 11CM EMBALADO","UN",0.033793],["500975001","ACADEMIA",4.0,"LEITE DESNATADO","UN",6.126552],["500975003","ACADEMIA",10.0,"LEITE INTEGRAL","UN",5.895733],["500976014","ACADEMIA",0.3,"QUEIJO MUSSARELA","KG",36.278891],["500976019","ACADEMIA",0.5,"QUEIJO PRATO","KG",44.306326],["500976022","ACADEMIA",2.0,"QUEIJO BRANCO","KG",39.390805],["511543092","AMANI",100.0,"POTE REDONDO KRAFT 720ML","UN",1.02],["511543095","AMANI",66.0,"POTE RED FIBRA VEGETAL 1LT","UN",1.03],["500150021","AMANI",12.0,"MAMAO FORMOSA","KG",5.603242],["521492007","AMANI",29.0,"PAO QUEIJO UNIDADE","UN",2.53333],["520766027","AMANI",120.0,"MINI PASTEL QUEIJO","UN",0.841125],["520766050","AMANI",300.0,"MINI PASTEL CARNE","UN",0.823805],["511522079","AMANI",70.0,"CAFE EXPRESSO C/ LEITE 3 CORAÇÕES","UN",1.632692],["511082064","AMANI",44.0,"CHA VERDE YAI LARANJA GENGIBRE","LT",4.0371],["511082065","AMANI",14.0,"CHA VERDE YAI LICHIA","LT",4.049349],["511082066","AMANI",21.0,"CHA VERDE YAI LIMAO HORTELA","LT",4.020246],["510872002","AMANI",5.0,"ACAI NATURAL","KG",15.832906],["511492072","AMANI",6.0,"BISCOITO OREO 90GR","PT",2.894038],["521492104","AMANI",7.0,"BATATA PALITO MCAIN 7MM","KG",16.564605],["510767007","AMANI",5.0,"PAO FORMA C/ CASCA WICK BOLD","PT",6.500702],["510767009","AMANI",18.0,"PAO HOT DOG BRIOCHE","UN",1.912333],["510767011","AMANI",5.0,"PAO SIRIO LANCHE BEIRUTHE","PT",17.999518],["510767028","AMANI",13.0,"PAO INTEGRAL WICK BOLD","PT",7.550186],["510767068","AMANI",18.0,"PAO HAMBURGUER TIPO BRIOCHE","UN",2.084306],["510767141","AMANI",32.0,"MINI BAGUETE HOMEBAKE","UN",1.800048],["510767158","AMANI",66.0,"PAO SIRIO TORRADO 40G","PT",1.935296],["511080001","AMANI",78.0,"AGUA C/ GAS 510ML","UN",1.310196],["511080003","AMANI",25.0,"AGUA COCO KEROCOCO 330ML","UN",4.034871],["511080006","AMANI",18.0,"AGUA COCO KEROCOCO 1LT","LT",9.53181],["511080007","AMANI",11.0,"AGUA H2OH! LIMAO","UN",4.026294],["511080012","AMANI",179.0,"AGUA S/ GAS 510ML","UN",0.943322],["511080017","AMANI",37.0,"AGUA TONICA DIET 350ML","LT",3.001332],["511080018","AMANI",26.0,"AGUA TONICA 350ML","LT",2.994153],["511080019","AMANI",6.0,"AGUA TONICA SCHWEPPES CITRUS","LT",3.48678],["511080025","AMANI",23.0,"AGUA H2OH! LIMONETO","UN",4.02047],["511080026","AMANI",36.0,"AGUA S/ GAS 240ML","UN",0.843716],["511081003","AMANI",141.0,"REFR COCA COLA 350ML","LT",3.492695],["511081006","AMANI",132.0,"REFR COCA COLA  ZERO 350ML","LT",3.508331],["511081008","AMANI",16.0,"REFR FANTA LARANJA 350ML","LT",2.945082],["511081012","AMANI",83.0,"REFR GUARANA 350ML","LT",2.987745],["511081013","AMANI",49.0,"REFR GUARANA DIET 350ML","LT",3.025661],["511081018","AMANI",9.0,"REFR SODA LIMONADA DIET 350ML","LT",2.77502],["511081019","AMANI",2.0,"REFR SODA LIMONADA 350ML","LT",2.762397],["511082003","AMANI",5.0,"GATORADE LARANJA","UN",4.606784],["511082008","AMANI",3.0,"GATORADE TANGERINA","UN",4.674396],["511082012","AMANI",3.0,"SUCO DEL VALLE PESSEGO","LT",3.608081],["511082014","AMANI",31.0,"SUCO DEL VALLE UVA","LT",3.628535],["521492011","AMANI",3.0,"SUCO TOMATE TEMPERADO 1LT","UN",20.23375],["511586001","AMANI",1.0,"CAMPARI GF","UN",46.926],["511185020","AMANI",16.2,"SAQUE AZUMA KIRIN 740ML","UN",32.827568],["511185023","AMANI",16.7,"VODKA ABSOLUT C/ 1LT","UN",63.042623],["511185025","AMANI",0.65,"VODKA SMIRNOFF 998ML","UN",28.893711],["511185038","AMANI",36.2,"WHISKY J WALKER BLACK LABEL DS","UN",135.553846],["511185039","AMANI",46.25,"WHISKY J WALKER RED L. 1LT","UN",79.631111],["511185052","AMANI",16.0,"WHISKY CHIVAS REAGAL GF","UN",108.852],["511185065","AMANI",3.6,"APERITIVO APEROL C/ 750ML","UN",39.88626],["511185144","AMANI",26.35,"AGUARD SALINAS 1LT","UN",49.628758],["511186009","AMANI",5.0,"GIN TANQUERAY  C/ 750ML","UN",89.400446],["511186020","AMANI",2.0,"LICOR CREME CASSIS C/ 720ML","UN",40.609184],["511186041","AMANI",1.0,"VERMOUTH CLASSICO 1LT","UN",77.0],["511186092","AMANI",0.7,"OLD FASHIONED GF 750 ML","UN",110.6],["511186093","AMANI",5.3,"NEGRONI CLASSICO GF 750 ML","UN",97.049587],["511186094","AMANI",26.65,"FITZGERALD GF 750 ML","UN",96.8816],["511186095","AMANI",1.0,"COSMOPOLITAN GF 750 ML","UN",110.614286],["511188009","AMANI",121.0,"CERVEJA ORIGINAL GARRAFA","UN",8.28662],["511188018","AMANI",22.0,"CERVEJA SPATEN 600ML","UN",7.692957],["511188038","AMANI",75.0,"CERVEJA HEINNEKEN LN 355 ML","UN",6.430168],["511188045","AMANI",108.0,"CERVEJA HEINNEKEN  600 ML","UN",9.287976],["511188063","AMANI",20.0,"CERVEJA HEINEKEN LN SEM ALCOOL","LT",6.464263],["511188066","AMANI",36.0,"CERVEJA  CORONA LONG NECK","UN",7.232102],["511188069","AMANI",125.0,"CERVEJA STELLA S/GLUTEM 600ML","UN",9.113],["511188075","AMANI",39.0,"CERVEJA CERPA EXPORT LN 350ML","UN",5.523789],["511187110","AMANI",5.0,"V E VEUVE DEVIENNE BRUT","UN",65.206471],["511187139","AMANI",3.0,"V E VEUVE VERNAY BRUT ROSE","UN",65.205333],["511187145","AMANI",3.0,"V T BRUNELLO DI MONTALCINO","UN",165.0],["511187216","AMANI",9.0,"V T DUFOULEUR MONOPOLE","UN",60.0],["511187275","AMANI",1.0,"V T MARQUES DE CASA CONCHA","UN",139.0],["511187294","AMANI",6.0,"V R VENTISQUERO RESERVA ROSE","UN",56.697407],["511187296","AMANI",3.0,"V R BONS VENTOS FRESH","UN",47.425556],["511187302","AMANI",1.0,"V B GREY SINGLE BLOCK CHARDON","UN",180.0],["511187313","AMANI",5.0,"V T SIGNATURE MALBEC","UN",37.541667],["511187320","AMANI",1.0,"V T SUTTER HOME CABERNET","UN",71.69],["511187321","AMANI",5.0,"V T CEST LA VIE PINOT SYRAH","UN",79.24],["511187324","AMANI",3.0,"V T BOURGONE VIEILLES VIGNES","UN",83.333333],["511187327","AMANI",3.0,"V T HSM COLHEITA SELECIONADA","UN",56.0],["511187332","AMANI",2.0,"V T PORTO POCAS TAWNY","UN",85.77],["511187337","AMANI",1.0,"V T TORRES CELESTE CRIANZA","UN",151.74],["511187357","AMANI",6.0,"V E LIDIO CARRARO DADIVAS BRUT","UN",75.408293],["511187362","AMANI",6.0,"V T LIDIO CARR GR VINDI QUORUM","UN",238.0],["511187368","AMANI",9.0,"V B ANUBIS CHARDONNAY","UN",37.402667],["511187372","AMANI",5.0,"V T VENTISQUERO RESER CAB SAUV","UN",58.308333],["511187381","AMANI",6.0,"V T CALLIA MALBEC 375ML","UN",28.822308],["511187384","AMANI",9.0,"V B ENTRE DOIS MUNDOS CHARDO","UN",79.55],["511187386","AMANI",7.0,"V T ENTRE DOIS MUNDOS CABERNET","UN",42.25],["511187388","AMANI",3.0,"V T ANUBIS RED BLEND","UN",40.966364],["511187389","AMANI",10.0,"V T VENTISQUERO RESER MERLOT","UN",59.207],["511187390","AMANI",7.0,"V T CODICI PRIMITIVO DI MANDUR","UN",111.524286],["511187391","AMANI",6.0,"V T MENAGE A TROIS RED BLEND","UN",115.82],["511187392","AMANI",5.0,"V T SIGNOS MALBEC","UN",36.74],["511186099","AMANI",1.0,"V T OPTA TORIGA NACIONAL","UN",93.42],["50461097","AMANI",10.0,"V T ROBERT MONDAVI PRIVATE SEL RED BLEND 750ML","UND",241.585],["50461132","AMANI",5.0,"V T BALBO SIGNATURE MALBEC","UN",145.373333],["50461011","AMANI",5.0,"V B CLAUDE VAL BLAN 2024","GF",70.0],["50461012","AMANI",3.0,"V T CLAUDE VAL ROUGE 2023","GF",70.0],["50461013","AMANI",2.0,"V T CHAUTEAU JAMIN 2021","GF",70.0],["50461014","AMANI",2.0,"V R CLAUDE VAL ROSE 2024","GF",70.0],["50461030","AMANI",6.0,"V E FREIXENET FRENCH ROSE ROYAL 750ML","UN",58.575],["50461031","AMANI",2.0,"V E FREIXENET FRENCH BRUT ROYAL 750ML","UN",58.575185],["511587043","AMANI",6.0,"V B DUFOULEUR MONOPOLE","UN",60.0],["511587064","AMANI",1.0,"VT HERU PINOT NOIR","UN",126.0],["511587091","AMANI",6.0,"V E DADIVAS BRUT","UN",58.874583],["511587103","AMANI",2.0,"V T TEMPO BORDEAUX","UN",575.0],["511587107","AMANI",3.0,"V T ROBERT MONDAVI CABERNET SA","UN",159.15],["510872017","AMANI",2.0,"COBERTURA P/ SORV  CHOCOLATE","LT",38.211053],["510872018","AMANI",1.0,"COBERTURA P/ SORV  MORANGO","UN",34.704],["510872026","AMANI",36.0,"SORVETE KIBON FRUTARE UVA","UN",5.00078],["510872031","AMANI",56.0,"SORVETE KIBON CHICABON","UN",6.646964],["510872041","AMANI",25.0,"SORVETE KIBON TABLITO","UN",6.989728],["510872042","AMANI",28.0,"SORVETE KIBON CORNETO CROCANTE","UN",7.872468],["510872049","AMANI",30.0,"SORVETE MASSA CHOCOLATE","LT",15.047467],["510872051","AMANI",50.0,"SORVETE MASSA CREME","LT",14.64992],["510872052","AMANI",10.0,"SORVETE MASSA MORANGO","LT",14.290429],["510872054","AMANI",11.0,"SORVETE KIBON ESKI-BOM","UN",6.969091],["510872069","AMANI",14.0,"SORVETE KIBON BRIGADEIRO","UN",6.72],["510872072","AMANI",67.0,"SORVETE KIBON MAGNUM CLASSICO","UN",11.70112],["510872073","AMANI",33.0,"SORVETE KIBON MAGNUM CHC. BRAN","UN",13.421102],["510872077","AMANI",19.0,"SORVETE KIBON MINI ESKI-BON","UN",10.606686],["510872079","AMANI",32.0,"SORVETE ROCHINHA  MELANCIA","UN",6.429776],["510872080","AMANI",10.0,"SORVETE ROCHINHA ABACATE","UN",7.65],["510872082","AMANI",9.0,"SORVETE ROCHINHA ACAI GUARANA","UN",6.540206],["510872085","AMANI",13.0,"SORVETE ROCHINHA BLUE ICE","UN",5.56],["510872086","AMANI",6.0,"SORVETE ROCHINHA CHOCOLATE","UN",7.638932],["510872087","AMANI",6.0,"SORVETE ROCHINHA COCO BRANCO","UN",7.833832],["510872091","AMANI",28.0,"SORVETE ROCHINHA GROSELHA","UN",5.6545],["510872093","AMANI",31.0,"SORVETE ROCHINHA LIMAO","UN",6.561802],["510872094","AMANI",16.0,"SORVETE ROCHINHA MARACUJA","UN",6.609324],["510872095","AMANI",14.0,"SORVETE ROCHINHA MILHO VERDE","UN",7.591161],["510872097","AMANI",22.0,"SORVETE ROCHINHA MORANGO","UN",7.650779],["510872100","AMANI",49.0,"SORVETE ROCHINHA TANGERINA","UN",6.456774],["510872101","AMANI",12.0,"SORVETE ROCHINHA UVA","UN",6.558704],["510872127","AMANI",35.0,"SORVETE KIBON FRUTARE LIMAO","UN",5.036667],["510872361","AMANI",4.0,"CREME AVELA NUTELLA 650GR","UN",45.317222],["510872376","AMANI",10.0,"SORVETE ROCHINHA COCO BRANCO Z","UN",8.294545],["510870060","AMANI",14.0,"DOCE LEITE PINGO","UN",0.793277],["510871022","AMANI",44.0,"GOMA MASCAR TUBO","UN",0.592485],["510825053","AMANI",30.0,"BANANINHA CRISTAL","UN",1.450851],["510825054","AMANI",16.0,"BANANINHA ZERO","UN",1.481148],["510870001","AMANI",4.0,"BOMBOM FERRERO ROCHER","UN",9.538757],["510870002","AMANI",35.0,"BOMBOM OURO BRANCO","UN",1.215067],["510870003","AMANI",36.0,"BOMBOM SONHO VALSA","UN",1.20555],["510870006","AMANI",26.0,"CHOC ALPINO","UN",2.056324],["510870008","AMANI",4.0,"CHOC CHOKITO (CX 30)","UN",2.573607],["510870012","AMANI",5.0,"CHOC PRESTIGIO","UN",2.576316],["510870016","AMANI",1.0,"CHOC TWIX","UN",1.136571],["510870023","AMANI",27.0,"DROPS FRUIT TELLA (CX 15","UN",2.358393],["510871200","AMANI",6.0,"GOIABADA CREMOSA RALSTON 1KG","UN",18.048889],["510871009","AMANI",2.0,"DOCE LEITE AVIACAO 400G","UN",9.212745],["510664004","AMANI",2.0,"AZEITE EXTRA VIRGEM ANDORINHA","ML",26.008781],["510664009","AMANI",1.0,"AZEITE EX. VIRGEM  5LT","UN",263.63],["510975001","AMANI",15.0,"COALHADA FRESCA","KG",46.747573],["533096415","AMANI",7000.0,"POTE MOLHO TAMPA ACOPLADA 90ML","UN",0.312463],["511543078","AMANI",30.0,"EMBALAGEM  POTE COM LACRE 500M","UN",1.0],["511543091","AMANI",30.0,"POTE KRAFT QUADRADO 1200ML","UN",1.295588],["533096035","AMANI",1.0,"FILME DE PVC 60CM","RL",124.0],["533096064","AMANI",8.0,"PAPEL ALUMINIO 30X7,5CM","RL",3.1],["533096071","AMANI",60.0,"PRATO DE PAPEL N¦ 05","UN",0.29],["533096086","AMANI",1.0,"SACO PLAS.TRANSP 35X45 C/ 500U","PT",98.8],["533096130","AMANI",10.0,"EMBALAGEM ALUMINIO","UN",0.770238],["533096383","AMANI",100.0,"POTE FIBRA VEGETAL 1400M","UN",1.696417],["533096385","AMANI",300.0,"POTE KRAFT QUADRADO 1200ML","UN",1.333583],["500563005","AMANI",16.0,"AZEITONA PRETA GRAUDA","KG",66.453],["500151008","AMANI",12.0,"BATATA LISA LAVADA","KG",4.573845],["500151030","AMANI",10.0,"PEPINO JAPONES","KG",8.065181],["500151040","AMANI",15.0,"TOMATE ITALIANO SALADA","KG",12.846589],["500151051","AMANI",10.0,"BATATA ASTERIX","KG",6.9624],["500151057","AMANI",15.0,"BROCOLIS CONGELADO","KG",11.84135],["500151066","AMANI",1.0,"CEBOLA EM PO","KG",36.6425],["500152031","AMANI",1.0,"RADICCIO","KG",37.224306],["500255012","AMANI",23.0,"FILE MIGNON BOVINO SEM CORDAO","KG",105.487583],["500258010","AMANI",2.0,"CAMARAO 40X60 LIMPO","KG",89.750352],["500258034","AMANI",7.0,"FILE SAINT PETER 150/200 CONGE","KG",47.68],["500258040","AMANI",1.3,"LULA LIMPA FRESCA","KG",71.822756],["500258100","AMANI",1.3,"TENTACULO POLVO FRESCO","KG",79.9],["500257014","AMANI",3.0,"FILE COXA E SOBRECOXAS","KG",11.407865],["500257015","AMANI",5.0,"FILE FRANGO","KG",14.748952],["500256001","AMANI",14.0,"BACON","KG",21.644656],["500256002","AMANI",12.0,"BARRIGA SUINA","KG",24.768868],["500256006","AMANI",10.0,"COSTELA SUINA SALGADA","KG",34.45674],["500256011","AMANI",5.0,"LOMBO SUINA SALGADO","KG",33.995918],["500256015","AMANI",6.1,"ORELHA SUINA SALGADA","KG",20.99],["500256016","AMANI",6.0,"PE SUINO SALGADO","KG",10.583333],["500256018","AMANI",6.1,"RABO SUINO SALGADO","KG",14.12],["500259002","AMANI",5.0,"LINGUICA PORTUGUESA","KG",26.282],["500259011","AMANI",2.5,"LINGUICA PAIO","KG",26.112727],["500259012","AMANI",2.5,"LINGUICA CALABRESA CURADA","KG",18.654388],["500259025","AMANI",5.0,"PEITO PERU DEFUMADO","KG",44.325926],["500259028","AMANI",9.0,"PRESUNTO COZIDO S/ GORDURA","KG",19.12436],["500259039","AMANI",3.0,"SALSICHA HOT DOG","KG",8.719167],["500259064","AMANI",75.0,"HAMBURGUER NATURA GUIDARA 165G","UN",5.615021],["500361002","AMANI",6.0,"ARROZ ARBORIO","KG",18.492759],["500361004","AMANI",13.0,"ARROZ TIPO 1 PRIMEIRA LINHA","KG",4.757426],["500361006","AMANI",8.0,"FEIJAO CARIOCA CAMIL","KG",8.790051],["500361007","AMANI",8.0,"FEIJAO PRETO","KG",7.425185],["500361008","AMANI",1.0,"GRAO DE BICO","KG",17.918746],["500361015","AMANI",3.0,"ARROZ INTEGRAL","KG",6.24],["500361017","AMANI",1.0,"QUINOA","KG",27.525556],["500563015","AMANI",1.0,"PALMITO EM CONSERV 3,15KG","UN",70.831],["500563021","AMANI",2.0,"CHAMPIGNON FATIADO EM CONSERVA","UN",56.762308],["500563001","AMANI",2.5,"ALHO FRITO","KG",35.524878],["500664001","AMANI",0.8,"ACAFRAO EM PO","KG",17.210714],["500664005","AMANI",2.5,"CALDO KNOR GALINHA 1KG","KG",18.490347],["500664010","AMANI",1.0,"MOLHO INGLES 900ML","UN",7.218182],["500664013","AMANI",1.0,"MOLHO SHOYO 900ML","UN",7.845],["500664015","AMANI",1.0,"OREGANO","KG",26.421538],["500664016","AMANI",0.5,"PAPRICA PICANTE","KG",42.222222],["500664017","AMANI",0.4,"PAPRICA DOCE","KG",18.620606],["500664018","AMANI",0.35,"PIMENTA DO REINO EM  PO","KG",58.04],["500664022","AMANI",1.0,"PIMENTA POIVRE","KG",55.37037],["500664025","AMANI",1.0,"SAL GROSSO","KG",2.153043],["500664026","AMANI",4.0,"SAL REFINADO","KG",2.238997],["500664028","AMANI",0.5,"ZAATAR PURO","KG",94.585834],["500664052","AMANI",0.3,"CARDAMOMO MOIDO","KG",37.133333],["500765001","AMANI",5.0,"MAC CABELO ANJO","PT",4.982712],["500765010","AMANI",9.0,"MAC PENE","PT",7.340917],["500765013","AMANI",2.0,"MAC ESPAGUETI N 5","PT",7.339407],["500765015","AMANI",2.0,"MASSA FOLHADA  REDONDO 2,8KG","KG",33.742752],["500765019","AMANI",12.0,"MAC ESPAGUETE BARILA INTEGRAL","PT",11.242],["500765023","AMANI",1.0,"MAC ESPAGUETI S/ GLUTEM BARILA","PT",8.21],["500765029","AMANI",8.0,"MAC FETUCCINE","PT",5.987647],["500870004","AMANI",1.0,"CHOCOLATE MEIO AMARGO BARRA","KG",83.709541],["501290005","AMANI",69.0,"CAFE SACHET RISTRETTO","UN",3.048866],["501290006","AMANI",89.0,"CAFE SACHET  DESCAFEINADO","UN",3.043891],["501290007","AMANI",29.0,"CAFE SACHET LEGGERO","UN",3.039587],["501290025","AMANI",100.0,"CAPSULAS CAFE TRES ESPRE PLENO","UN",1.950088],["500258002","AMANI",16.0,"ATUM SOLIDO  170G RUBI","LT",9.288204],["501492007","AMANI",1.0,"ALCAPARRA CONSERVA","KG",40.02],["501492023","AMANI",0.3,"COLORAL","KG",8.655412],["501492044","AMANI",1.0,"MAIZENA 1KG","CX",21.217632],["501492056","AMANI",30.0,"OLEO SOJA GALAO 6LT","LT",3.893327],["501492063","AMANI",4.0,"VINAGRE BALSAMICO MODEMA","UN",19.361991],["501492067","AMANI",1.1,"UVA PASSA BRANCA SECA","KG",35.938462],["501492072","AMANI",150.0,"OVO BRANCO","UN",0.609975],["501492074","AMANI",3.0,"VINAGRE BRANCO 750ML","UN",2.215769],["501492102","AMANI",7.0,"MANDIOCA CONGELADA CREMOSA","KG",22.5],["501492144","AMANI",2.0,"MOLHO DE ROMA","LT",38.796452],["501492145","AMANI",2.0,"CATCHUP GALAO 3,8KG HEMMER","UN",37.795385],["501492146","AMANI",2.0,"MOSTARDA AMARELA 3,6KG HEMMER","UN",40.533636],["500462003","AMANI",3.0,"FARINHA MANDIOCA CRUA","KG",7.274082],["500462005","AMANI",5.0,"FARINHA TRIGO","KG",4.652926],["500462010","AMANI",1.5,"CUSCUZ MARROQUINO","KG",39.245455],["500462012","AMANI",6.0,"FARINHA EMPANAR FIOCCOPAN","KG",16.952917],["500462014","AMANI",4.0,"FARINHA EMPANAR PANCO","KG",15.962297],["500462018","AMANI",1.0,"FARINHA ARROZ S/ GLUTEM","KG",6.92],["500462021","AMANI",2.0,"FARINHA MANDIOCADEUSA BIJU","KG",11.664296],["500975003","AMANI",22.0,"LEITE INTEGRAL","UN",5.895733],["500975006","AMANI",1.0,"CREME LEITE FRESCO","UN",45.37819],["500975011","AMANI",3.0,"REQUEIJAO BISNAGA","KG",30.385977],["500976002","AMANI",3.0,"MUSSARELA BUFALA CEREJA 400GR","PT",20.295],["500976005","AMANI",1.0,"QUEIJO CHANCLICHE","UN",19.963019],["500976014","AMANI",7.0,"QUEIJO MUSSARELA","KG",36.278891],["500976018","AMANI",5.0,"QUEIJO PARMESAO","KG",68.996941],["500976019","AMANI",15.0,"QUEIJO PRATO","KG",44.306326],["500976022","AMANI",2.7,"QUEIJO BRANCO","KG",39.390805],["500977002","AMANI",5.0,"MANTEIGA S/ SAL","KG",27.507213],["500977003","AMANI",3.0,"MARGARINA 15 KG","LT",152.777968],["511536043","ALL SPORTS",5.1,"FRALDINHA PORCIONADA KG","UN",15.0],["511532147","ALL SPORTS",9.0,"EMPANADA CARNE","UN",5.7],["511532149","ALL SPORTS",13.0,"EMPANADA CEBOLA QUEIJO","UN",5.7],["511522077","ALL SPORTS",47.0,"CAFE EXPRESSO  3 CORACOES","UN",7.0],["511522079","ALL SPORTS",6.0,"CAFE EXPRESSO C/ LEITE 3 CORAÇÕES","UN",1.632692],["511535213","ALL SPORTS",9.5,"CHORIZO KG","KG",20.0],["500255046","ALL SPORTS",8.8,"BIFE ANCHO ESP GUIDARA","KG",99.900407],["521492033","ALL SPORTS",2.0,"POLENTA PALITO","KG",7.1324],["521492104","ALL SPORTS",12.5,"BATATA PALITO MCAIN 7MM","KG",16.564605],["511443021","ALL SPORTS",8.0,"AMENDOIM S/ PELE 200G BRA FRUT","PT",4.736667],["511443011","ALL SPORTS",4.0,"CASTANHA TORRA 200G BRA FRUTT","PT",20.423077],["510767011","ALL SPORTS",4.0,"PAO SIRIO LANCHE BEIRUTHE","PT",17.999518],["510767068","ALL SPORTS",30.0,"PAO HAMBURGUER TIPO BRIOCHE","UN",2.084306],["511080001","ALL SPORTS",33.0,"AGUA C/ GAS 510ML","UN",1.310196],["511080003","ALL SPORTS",5.0,"AGUA COCO KEROCOCO 330ML","UN",4.034871],["511080006","ALL SPORTS",11.0,"AGUA COCO KEROCOCO 1LT","LT",9.53181],["511080007","ALL SPORTS",11.0,"AGUA H2OH! LIMAO","UN",4.026294],["511080012","ALL SPORTS",48.0,"AGUA S/ GAS 510ML","UN",0.943322],["511080017","ALL SPORTS",16.0,"AGUA TONICA DIET 350ML","LT",3.001332],["511080018","ALL SPORTS",16.0,"AGUA TONICA 350ML","LT",2.994153],["511080019","ALL SPORTS",17.0,"AGUA TONICA SCHWEPPES CITRUS","LT",3.48678],["511080025","ALL SPORTS",6.0,"AGUA H2OH! LIMONETO","UN",4.02047],["511081003","ALL SPORTS",32.0,"REFR COCA COLA 350ML","LT",3.492695],["511081006","ALL SPORTS",21.0,"REFR COCA COLA  ZERO 350ML","LT",3.508331],["511081008","ALL SPORTS",10.0,"REFR FANTA LARANJA 350ML","LT",2.945082],["511081012","ALL SPORTS",13.0,"REFR GUARANA 350ML","LT",2.987745],["511081013","ALL SPORTS",23.0,"REFR GUARANA DIET 350ML","LT",3.025661],["511081018","ALL SPORTS",5.0,"REFR SODA LIMONADA DIET 350ML","LT",2.77502],["511081019","ALL SPORTS",17.0,"REFR SODA LIMONADA 350ML","LT",2.762397],["511082003","ALL SPORTS",2.0,"GATORADE LARANJA","UN",4.606784],["511082005","ALL SPORTS",4.0,"GATORADE LIMAO","UN",4.664653],["511082006","ALL SPORTS",8.0,"GATORADE MARACUJA","UN",4.7],["511082008","ALL SPORTS",9.0,"GATORADE TANGERINA","UN",4.674396],["511082009","ALL SPORTS",12.0,"GATORADE UVA","UN",4.664625],["511082047","ALL SPORTS",14.0,"RED BULL TROPICAL 250ML","LT",8.386699],["511082052","ALL SPORTS",30.0,"RED BULL 250 ML","LT",8.474028],["511082012","ALL SPORTS",21.0,"SUCO DEL VALLE PESSEGO","LT",3.608081],["511082014","ALL SPORTS",7.0,"SUCO DEL VALLE UVA","LT",3.628535],["521492011","ALL SPORTS",1.0,"SUCO TOMATE TEMPERADO 1LT","UN",20.23375],["511185005","ALL SPORTS",5.2,"AGUARD ESPIRITO","UN",63.652109],["511185010","ALL SPORTS",4.35,"CACHACA SIRIO C/ 700ML","UN",100.604167],["511185017","ALL SPORTS",1.0,"ARAK  C/ 700ML","UN",33.655462],["511185020","ALL SPORTS",5.3,"SAQUE AZUMA KIRIN 740ML","UN",32.827568],["511185021","ALL SPORTS",1.0,"TEQUILA JOSE CUERVO PRATA DOSE","UN",0.22],["511185022","ALL SPORTS",1.0,"TEQUILA JOSE CUERVO ORURO","UN",0.01],["511185023","ALL SPORTS",2.2,"VODKA ABSOLUT C/ 1LT","UN",63.042623],["511185025","ALL SPORTS",5.35,"VODKA SMIRNOFF 998ML","UN",28.893711],["511185037","ALL SPORTS",1.2,"WHISKY JACK DANIELS 1LT","UN",157.15331],["511185039","ALL SPORTS",5.45,"WHISKY J WALKER RED L. 1LT","UN",79.631111],["511185042","ALL SPORTS",1.45,"VODKA GREY GOOSE DOSE","UN",10.33],["511185045","ALL SPORTS",6.0,"WHISKY BLACK WHITE 1L","UN",37.1225],["511185047","ALL SPORTS",2.15,"WHISKIE CUTTY SARK 8 ANOS 1LT","UN",47.473016],["511185051","ALL SPORTS",4.0,"WHISKY BUCHANANS 12 ANOS GF","UN",134.270383],["511185052","ALL SPORTS",3.5,"WHISKY CHIVAS REAGAL GF","UN",108.852],["511185058","ALL SPORTS",2.45,"WHISKY J WALKER GREEN L 750ML","UN",402.520833],["511185065","ALL SPORTS",4.0,"APERITIVO APEROL C/ 750ML","UN",39.88626],["511185077","ALL SPORTS",2.0,"WHISKY SINGLETON 12 ANOS 750ML","UN",200.0],["511185078","ALL SPORTS",4.5,"WHISKY J WALKER GOLD RES 750ML","UN",222.709294],["511185079","ALL SPORTS",2.0,"WHISKY DEWARS 12ANOS 750ML","UN",96.8],["511185083","ALL SPORTS",1.0,"WHISKY CHIVAS ROYAL SALUT 21AN","UN",52.85],["511185092","ALL SPORTS",2.75,"WHISKY J WALKER DOUBLE BLACK","UN",200.0],["511185096","ALL SPORTS",1.0,"WHISKY JAMESON","UN",98.3],["511185097","ALL SPORTS",4.3,"WHISKY JAMESON CASKMATE IPA","UN",76.001087],["511185099","ALL SPORTS",1.0,"VODKA CIROC RED BERRY","UN",8.98],["511185100","ALL SPORTS",1.0,"VODKA WIBOROWA EXQUISITE","UN",8.38],["511185101","ALL SPORTS",1.5,"VODKA PRAVDA","UN",7.585714],["511185102","ALL SPORTS",2.0,"SAQUE GEKKEIKAN","UN",69.09],["511185110","ALL SPORTS",2.45,"WHISKY J WALKER BLUE LABEL","UN",1035.0],["511185126","ALL SPORTS",1.0,"WHISKY JIM BEAM BLACK 1LT","UN",130.19],["511185144","ALL SPORTS",3.0,"AGUARD SALINAS 1LT","UN",49.628758],["511185147","ALL SPORTS",2.0,"AGUARD SELETA 1LITRO","UN",38.639394],["511186001","ALL SPORTS",2.0,"CAMPARI BITTER NACIONAL 900ML","UN",47.903093],["511186009","ALL SPORTS",1.65,"GIN TANQUERAY  C/ 750ML","UN",89.400446],["511186020","ALL SPORTS",1.0,"LICOR CREME CASSIS C/ 720ML","UN",40.609184],["511186026","ALL SPORTS",0.4,"LICOR DRAMBUIE DOSE","UN",152.748936],["511186036","ALL SPORTS",1.0,"FERNETE BRANCO 750ML","UN",116.435556],["511186047","ALL SPORTS",1.0,"LICOR 43 DIEGO ZAMORA 700ML","UN",129.5],["511186050","ALL SPORTS",1.0,"GIN HENDRICKS 1LTS","UN",12.85],["511186051","ALL SPORTS",1.0,"GIN BOMBAY SAPHIRE DOSE","UN",7.88],["511186053","ALL SPORTS",1.0,"VERMOUTH CARPANO PUNT MES 1LTS","UN",81.888],["511186054","ALL SPORTS",1.0,"GIN MONKEY47","UN",17.808696],["511186056","ALL SPORTS",1.0,"GIN MARE","UN",29.08],["511186058","ALL SPORTS",2.0,"GIN BULLDOG LONDON","UN",8.18],["511186060","ALL SPORTS",1.0,"GIN BEEFEATER 24","UN",9.72],["511186061","ALL SPORTS",2.0,"LICOR 43 DIEGO ZAMORA B. 700ML","UN",142.95],["511186094","ALL SPORTS",1.0,"FITZGERALD GF 750 ML","UN",96.8816],["511188009","ALL SPORTS",65.0,"CERVEJA ORIGINAL GARRAFA","UN",8.28662],["511188098","ALL SPORTS",20.0,"CERVEJA STELLA LONG NECK 330ML","ML",6.450386],["511188038","ALL SPORTS",42.0,"CERVEJA HEINNEKEN LN 355 ML","UN",6.430168],["511188045","ALL SPORTS",150.0,"CERVEJA HEINNEKEN  600 ML","UN",9.287976],["511188061","ALL SPORTS",27.0,"CERVEJA STELLA S/GLUTEM 330ML","UN",6.802297],["511188063","ALL SPORTS",34.0,"CERVEJA HEINEKEN LN SEM ALCOOL","LT",6.464263],["511188066","ALL SPORTS",45.0,"CERVEJA  CORONA LONG NECK","UN",7.232102],["511188069","ALL SPORTS",14.0,"CERVEJA STELLA S/GLUTEM 600ML","UN",9.113],["511188075","ALL SPORTS",33.0,"CERVEJA CERPA EXPORT LN 350ML","UN",5.523789],["510871188","ALL SPORTS",3.0,"RAPADURA","KG",22.702],["500150017","ALL SPORTS",1.0,"LIMA PERSIA","KG",10.064167],["500150018","ALL SPORTS",2.0,"LIMAO","KG",8.919175],["500150045","ALL SPORTS",1.0,"LIMAO SICILIANO","KG",8.054067],["500150051","ALL SPORTS",9.0,"COCO DESCASCADO","UN",8.399914],["500255047","ALL SPORTS",9.5,"BIFE CHORIZO ESP GUIDARA","KG",77.310825],["500255071","ALL SPORTS",5.1,"FRALDINHA ANGUS","KG",100.206749],["500259063","ALL SPORTS",38.0,"HAMBURGUER  WAGYU 165G","UN",11.8975],["500259082","ALL SPORTS",18.0,"LINGUICA CANASTRA FINA","KG",51.180989],["500664025","ALL SPORTS",5.0,"SAL GROSSO","KG",2.153043]]}};
+const CONF_PREFIXOS_AUTO = ['504610','510825','510870','510871','510872','511080','511081','511082','511187','511188','511443','511492','511581','511582','511587'];
+const CONF_GRUPOS_PRONTO = ['AGUA','REFRIGERANTES','ENERG./GATOR./SUCO E CHA PRONT','CERVEJA','VINHO/ESPUMANTE/CHAMPANHE','CHOCOLATE/BALA/CHICLETE'];
+const CONF_PDV_BASE = ['Amani','Bar Academia','All Sport Bar','Sala Damasco','Bar Carteado','Buffet Social'];
+const CONF_PDV_VENDA = { 'AMANI':'Amani', 'BAR ACADEMIA':'Bar Academia', 'SAUNA':'Bar Academia', 'ALL SPORT BAR':'All Sport Bar', 'SALA DAMASCO':'Sala Damasco', 'CARTEADO':'Bar Carteado', 'BUFFET SOCIAL':'Buffet Social' };
+const CONF_CC_PDV = { 'AMANI':'Amani', 'BAR ACADEMIA':'Bar Academia', 'ALL SPORT BAR':'All Sport Bar', 'SALA DAMASCO':'Sala Damasco', 'BAR CARTEADO':'Bar Carteado' };
+const CONF_SETOR_PDV = { 'AMANI':'Amani', 'ACADEMIA':'Bar Academia', 'ALL SPORTS':'All Sport Bar', 'DAMASCO':'Sala Damasco', 'CARTEADO':'Bar Carteado' };
+const CONF_LEITOR_XLSX = { url:'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', sri:'sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw' };
 const CONF_COB_ALTA = 60;                      // dias de cobertura acima disso = estoque esperado alto
-let CONF_CONTAGEM = {};
-let CONF_CARREGADO = false;
+const CONF_TIPOS = {
+  inv:    { nome:'inventário',  obrig:['produto','quantidade','setor'] },
+  vendas: { nome:'vendas',      obrig:['descricaolocal','data','produto','descricao','qtde'] },
+  req:    { nome:'requisições', obrig:['material','quantidade','centrodecusto'] }
+};
+const CONF_MESES_NOME = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const CONF_C = { vendas:{}, req:{}, inv:{}, manual:{}, periodo:{}, carregando:{}, carregado:{} };   // cache por mês / por data
+let CONF_MESES = [CONF_BASE.chave];            // meses com dados (base + enviados)
+let CONF_MES = CONF_BASE.chave;                // mês na tela
+let CONF_ESCOLHEU = false;                     // a pessoa trocou o mês à mão
+let CONF_INDICE_OK = false;
 let CONF_FOCO_PROX = -1;
+let CONF_PENDENTE = null;                      // arquivo lido, aguardando "Aplicar"
 
+/* ---------- utilitários ---------- */
 function confN(v, c){ return (Number(v)||0).toLocaleString('pt-BR',{maximumFractionDigits: c==null?2:c}); }
 function confE(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
 function confBRL(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function confDataBR(iso){ const m = String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3]+'/'+m[2]+'/'+m[1] : String(iso||''); }
+function confRotuloMes(mes){ const m = String(mes).match(/^(\d{4})-(\d{2})$/); return m ? CONF_MESES_NOME[+m[2]-1] + '/' + m[1] : String(mes); }
+function confUltimoDia(mes){ const p = mes.split('-'); const d = new Date(Date.UTC(+p[0], +p[1], 0)); return d.toISOString().slice(0,10); }
+function confPrimeiroDia(mes){ return mes + '-01'; }
+function confMesAnterior(mes){ const p = mes.split('-'); const d = new Date(Date.UTC(+p[0], +p[1]-2, 1)); return d.toISOString().slice(0,7); }
+function confDiasMes(mes){ return +confUltimoDia(mes).slice(8); }
+function confEhFimDeMes(iso){ return /^\d{4}-\d{2}-\d{2}$/.test(iso) && confUltimoDia(iso.slice(0,7)) === iso; }
+function confNormCab(t){ return String(t==null?'':t).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,''); }
+function confNumero(v){
+  if(typeof v === 'number') return v;
+  let t = String(v==null?'':v).trim(); if(t === '') return NaN;
+  if(t.indexOf(',') >= 0) t = t.replace(/\./g,'').replace(',','.');
+  return Number(t);
+}
+function confCodigo(v){ return (typeof v === 'number') ? String(Math.round(v)) : String(v==null?'':v).trim().replace(/\.0+$/,''); }
+function confPdvVenda(local){ const k = normNome(local); return CONF_PDV_VENDA[k] || String(local).trim(); }
+function confPdvConhecidoVenda(local){ return !!CONF_PDV_VENDA[normNome(local)]; }
+/* data em qualquer formato comum -> AAAA-MM-DD (ou null). Número = data serial do Excel. */
+function confParseData(v){
+  if(v == null || v === '') return null;
+  if(typeof v === 'number'){
+    if(v < 30000 || v > 80000) return null;
+    return new Date(Math.round((Math.floor(v) - 25569) * 86400000)).toISOString().slice(0,10);
+  }
+  if(v instanceof Date){ return isNaN(v) ? null : v.getFullYear() + '-' + String(v.getMonth()+1).padStart(2,'0') + '-' + String(v.getDate()).padStart(2,'0'); }
+  const t = String(v).trim();
+  let m = t.match(/^(\d{2})\/(\d{2})\/(\d{4})/); if(m) return m[3]+'-'+m[2]+'-'+m[1];
+  m = t.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return m[1]+'-'+m[2]+'-'+m[3];
+  return null;
+}
 
-function confLinhas(modo){
-  const E = CONF_ESTOQUE;
+/* ---------- leitura de arquivo (xls, xlsx, csv) ---------- */
+function confDecodificar(buf){
+  try{ return new TextDecoder('utf-8', { fatal:true }).decode(buf); }
+  catch(e){ return new TextDecoder('windows-1252').decode(buf); }
+}
+function confCsvParaMatriz(texto){
+  texto = String(texto).replace(/^\uFEFF/, '');
+  const prim = texto.split(/\r?\n/)[0] || '';
+  const sep = [';','\t',','].map(function(s){ return [s, prim.split(s).length]; }).sort(function(a,b){ return b[1]-a[1]; })[0][0];
+  const out = []; let lin = [], cel = '', asp = false;
+  for(let i = 0; i < texto.length; i++){
+    const ch = texto[i];
+    if(asp){ if(ch === '"'){ if(texto[i+1] === '"'){ cel += '"'; i++; } else asp = false; } else cel += ch; }
+    else if(ch === '"') asp = true;
+    else if(ch === sep){ lin.push(cel); cel = ''; }
+    else if(ch === '\n' || ch === '\r'){ if(ch === '\r' && texto[i+1] === '\n') i++; lin.push(cel); cel = ''; out.push(lin); lin = []; }
+    else cel += ch;
+  }
+  if(cel !== '' || lin.length){ lin.push(cel); out.push(lin); }
+  return out;
+}
+/* O leitor de Excel só é baixado quando alguém sobe .xls/.xlsx (a tela não fica mais pesada por isso). */
+function confCarregarLeitorExcel(){
+  if(window.XLSX) return Promise.resolve(window.XLSX);
+  return new Promise(function(ok, falha){
+    const s = document.createElement('script');
+    s.src = CONF_LEITOR_XLSX.url; s.integrity = CONF_LEITOR_XLSX.sri; s.crossOrigin = 'anonymous';
+    s.onload = function(){ window.XLSX ? ok(window.XLSX) : falha(new Error('leitor indisponível')); };
+    s.onerror = function(){ falha(new Error('não consegui baixar o leitor de Excel')); };
+    document.head.appendChild(s);
+  });
+}
+/* Acha a linha de cabeçalho. idx[chave] = lista de colunas (o cabeçalho de requisições repete "Descrição"). */
+function confAcharCab(matriz, obrig, limite){
+  for(let i = 0; i < Math.min(matriz.length, limite || 20); i++){
+    const idx = {};
+    (matriz[i] || []).forEach(function(c, j){ const k = confNormCab(c); if(k){ (idx[k] = idx[k] || []).push(j); } });
+    if(obrig.every(function(k){ return idx[k]; })) return { h:i, idx:idx };
+  }
+  return null;
+}
+/* Devolve a matriz da aba certa. Num Excel com várias abas (ex.: vendas x requisições x inventário), procura
+   a aba cujo cabeçalho serve ao tipo pedido; só essa é lida por inteiro. */
+async function confLerMatriz(file, tipo){
+  const T = CONF_TIPOS[tipo];
+  const buf = await file.arrayBuffer();
+  const ext = (String(file.name).split('.').pop() || '').toLowerCase();
+  const orient = ' Suba o arquivo de ' + T.nome + ' no mesmo layout do anterior.';
+  if(ext === 'xls' || ext === 'xlsx'){
+    let X;
+    try{ X = await confCarregarLeitorExcel(); }
+    catch(e){ return { erro:'Não consegui carregar o leitor de Excel (' + e.message + '). Abra o arquivo, salve como CSV e suba de novo.' }; }
+    const wb = X.read(buf, { type:'array', dense:true });
+    for(const nome of wb.SheetNames){
+      const ws = wb.Sheets[nome];
+      const cab = X.utils.sheet_to_json(ws, { header:1, raw:true, defval:'', range:{ s:{ r:0, c:0 }, e:{ r:19, c:60 } } });
+      if(confAcharCab(cab, T.obrig)) return { matriz:X.utils.sheet_to_json(ws, { header:1, raw:true, defval:'' }), aba:nome };
+    }
+    return { erro:'Não encontrei, em nenhuma aba, as colunas de ' + T.nome + ' (' + T.obrig.join(', ') + ').' + orient };
+  }
+  const matriz = confCsvParaMatriz(confDecodificar(buf));
+  if(!confAcharCab(matriz, T.obrig)) return { erro:'Não encontrei as colunas de ' + T.nome + ' (' + T.obrig.join(', ') + ') no cabeçalho.' + orient };
+  return { matriz:matriz };
+}
+
+function confParseInventario(matriz){
+  const cab = confAcharCab(matriz, CONF_TIPOS.inv.obrig); if(!cab) return { erro:'Cabeçalho de inventário não encontrado.' };
+  const ix = cab.idx, c = function(k){ return ix[k] ? ix[k][0] : undefined; };
+  const linhas = [], ignoradas = [];
+  for(let i = cab.h + 1; i < matriz.length; i++){
+    const r = matriz[i] || [];
+    const cod = confCodigo(r[c('produto')]); if(!cod) continue;
+    const qtd = confNumero(r[c('quantidade')]);
+    const setor = String(r[c('setor')]==null?'':r[c('setor')]).trim().toUpperCase();
+    if(isNaN(qtd) || !setor){ ignoradas.push(i + 1); continue; }
+    const g = function(k){ return c(k) === undefined ? '' : String(r[c(k)]==null?'':r[c(k)]).trim(); };
+    linhas.push({ cod:cod, nome:g('descricao'), un:g('und'), qtd:qtd, valor:c('valor') === undefined ? 0 : (confNumero(r[c('valor')]) || 0), setor:setor });
+  }
+  if(!linhas.length) return { erro:'O arquivo não tem nenhuma linha de inventário válida.' };
+  return { linhas:linhas, ignoradas:ignoradas };
+}
+/* Vendas: soma por mês + ponto de venda + produto. Devolve todos os meses encontrados. */
+function confParseVendas(matriz){
+  const cab = confAcharCab(matriz, CONF_TIPOS.vendas.obrig); if(!cab) return { erro:'Cabeçalho de vendas não encontrado.' };
+  const ix = cab.idx, c = function(k){ return ix[k] ? ix[k][0] : undefined; };
+  const meses = {}; let semData = 0, lidas = 0;
+  for(let i = cab.h + 1; i < matriz.length; i++){
+    const r = matriz[i] || [];
+    const cod = confCodigo(r[c('produto')]); if(!cod) continue;
+    const qtd = confNumero(r[c('qtde')]); if(isNaN(qtd)) continue;
+    const dt = confParseData(r[c('data')]); if(!dt){ semData++; continue; }
+    const mes = dt.slice(0,7);
+    const M = meses[mes] || (meses[mes] = { n:0, ini:dt, fim:dt, agg:{} });
+    M.n++; lidas++;
+    if(dt < M.ini) M.ini = dt; if(dt > M.fim) M.fim = dt;
+    const local = String(r[c('descricaolocal')]==null?'':r[c('descricaolocal')]).trim();
+    const k = local + '|' + cod;
+    const a = M.agg[k] || (M.agg[k] = { local:local, cod:cod, desc:'', grupo:'', qtd:0, valor:0 });
+    if(!a.desc) a.desc = String(r[c('descricao')]==null?'':r[c('descricao')]).trim();
+    if(!a.grupo && c('descricaogrupo') !== undefined) a.grupo = String(r[c('descricaogrupo')]==null?'':r[c('descricaogrupo')]).trim();
+    a.qtd += qtd; if(c('valor') !== undefined) a.valor += (confNumero(r[c('valor')]) || 0);
+  }
+  if(!lidas) return { erro:'Nenhuma linha de venda com data válida.' };
+  return { meses:meses, semData:semData, lidas:lidas };
+}
+/* Requisições: soma por centro de custo + material. O arquivo não tem data: o mês é escolhido na prévia. */
+function confParseReq(matriz){
+  const cab = confAcharCab(matriz, CONF_TIPOS.req.obrig); if(!cab) return { erro:'Cabeçalho de requisições não encontrado.' };
+  const ix = cab.idx, mat = ix.material[0], cc = ix.centrodecusto[0];
+  const depois = function(ini){ return (ix.descricao || []).filter(function(j){ return j > ini; })[0]; };
+  const cNome = depois(mat), cCCnome = depois(cc);
+  const cUn = ix.un ? ix.un[0] : undefined, cQ = ix.quantidade[0], cVU = ix.valorunitario ? ix.valorunitario[0] : undefined;
+  if(cNome === undefined || cCCnome === undefined) return { erro:'Faltam as colunas de descrição do material e do centro de custo.' };
+  const agg = {}, ccs = {}; let n = 0;
+  for(let i = cab.h + 1; i < matriz.length; i++){
+    const r = matriz[i] || [];
+    const cod = confCodigo(r[mat]); if(!cod) continue;
+    const q = confNumero(r[cQ]); if(isNaN(q)) continue;
+    const ccn = String(r[cCCnome]==null?'':r[cCCnome]).trim();
+    const k = ccn + '|' + cod;
+    const a = agg[k] || (agg[k] = { cc:ccn, cod:cod, nome:String(r[cNome]==null?'':r[cNome]).trim(), un:cUn === undefined ? '' : String(r[cUn]==null?'':r[cUn]).trim(), qtd:0, vt:0 });
+    a.qtd += q; a.vt += q * (cVU === undefined ? 0 : (confNumero(r[cVU]) || 0));
+    ccs[ccn] = (ccs[ccn] || 0) + 1; n++;
+  }
+  if(!n) return { erro:'Nenhuma linha de requisição válida.' };
+  return { linhas:Object.keys(agg).map(function(k){ return agg[k]; }), ccs:ccs, lidas:n };
+}
+/* Data do inventário a partir do nome do arquivo (ex.: Inventario_PDVS_300926.xls = 30/09/2026). */
+function confDataDoNome(nome){
+  const base = String(nome||'').replace(/\.[^.]+$/, '');
+  const m = base.match(/(\d{2})[-_.\/](\d{2})[-_.\/](\d{4}|\d{2})(?!\d)/) || base.match(/(?:^|\D)(\d{2})(\d{2})(\d{4}|\d{2})(?!\d)/);
+  if(!m) return null;
+  const d = +m[1], mo = +m[2]; let a = +m[3]; if(a < 100) a += 2000;
+  const dt = new Date(a, mo-1, d);
+  if(dt.getFullYear() !== a || dt.getMonth() !== mo-1 || dt.getDate() !== d) return null;
+  return a + '-' + String(mo).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+}
+
+/* ---------- montagem do quadro de um mês a partir dos arquivos ---------- */
+function confMontar(mes, vend, req, abre, fecha){
+  const faltam = [];
+  if(!vend) faltam.push('vendas'); if(!req) faltam.push('requisições'); if(!abre) faltam.push('inventário de abertura (' + confDataBR(confUltimoDia(confMesAnterior(mes))) + ')');
+  if(faltam.length) return { faltam:faltam };
+  /* catálogo do almoxarifado: base + o que os arquivos do mês trouxerem (custo do inventário vale mais que o da requisição) */
+  const cat = {}, nomeCod = {};
+  Object.keys(CONF_CATALOGO).forEach(function(c){ const a = CONF_CATALOGO[c]; cat[c] = { n:a[0], u:a[1], cu:a[2] }; nomeCod[normNome(a[0])] = c; });
+  const reg = function(cod, n, u, cu){
+    if(!cod) return;
+    const o = cat[cod] || (cat[cod] = { n:n || cod, u:u || '', cu:0 });
+    if(n){ o.n = n; if(!nomeCod[normNome(n)] || nomeCod[normNome(n)] !== cod) nomeCod[normNome(n)] = cod; }
+    if(u) o.u = u; if(cu) o.cu = cu;
+  };
+  req.linhas.forEach(function(l){ reg(l[1], l[2], l[3], l[4] > 0 ? l[5] / l[4] : 0); });
+  abre.linhas.forEach(function(l){ reg(String(l[0]), l[3], l[4], l[5]); });
+  if(fecha) fecha.linhas.forEach(function(l){ reg(String(l[0]), l[3], l[4], l[5]); });
+  /* vendas -> item do almoxarifado */
+  const vprod = {};
+  vend.linhas.forEach(function(l){
+    const p = vprod[l[1]] || (vprod[l[1]] = { desc:l[2], grupo:'', qtd:0, valor:0 });
+    if(!p.grupo && l[3]) p.grupo = l[3];
+    p.qtd += l[4]; p.valor += l[5];
+  });
+  const mapa = {}, novos = [], sem = [];
+  Object.keys(vprod).forEach(function(c){
+    const p = vprod[c];
+    if(CONF_MAPA[c]){ mapa[c] = CONF_MAPA[c]; return; }
+    const cod = nomeCod[normNome(p.desc)];
+    if(cod && CONF_PREFIXOS_AUTO.some(function(pf){ return cod.indexOf(pf) === 0; })){ mapa[c] = cod; novos.push([c, p.desc, cat[cod].n]); return; }
+    if(CONF_GRUPOS_PRONTO.indexOf(p.grupo) >= 0){
+      const why = /CHOPP/.test(p.desc) ? 'Chope: sai por barril/litro, não há item unitário'
+                : /GATORADE/.test(p.desc) ? 'Sabor sem item no almoxarifado: conferir se entrou com outro nome'
+                : 'Sem item equivalente no almoxarifado';
+      sem.push([c, p.desc, p.grupo, Math.round(p.qtd*10)/10, Math.round(p.valor), why]);
+    }
+  });
+  sem.sort(function(a,b){ return b[4] - a[4]; });
+  const incl = {}; Object.keys(mapa).forEach(function(c){ incl[mapa[c]] = 1; });
+  /* soma por PDV x item */
+  const pdvs = CONF_PDV_BASE.slice(), ign = {};
+  const pi = function(p){ let i = pdvs.indexOf(p); if(i < 0){ pdvs.push(p); i = pdvs.length - 1; } return i; };
+  const agg = {};
+  const get = function(p, cod){ const k = pi(p) + '|' + cod; return agg[k] || (agg[k] = { p:pi(p), cod:cod, inv:0, req:0, vend:0 }); };
+  vend.linhas.forEach(function(l){ const cod = mapa[l[1]]; if(cod) get(confPdvVenda(l[0]), cod).vend += l[4]; });
+  req.linhas.forEach(function(l){
+    const p = CONF_CC_PDV[normNome(l[0])];
+    if(!p){ ign[l[0]] = 1; return; }
+    if(incl[l[1]]) get(p, l[1]).req += l[4];
+  });
+  const temSetor = {};
+  abre.linhas.forEach(function(l){
+    const p = CONF_SETOR_PDV[String(l[1]).trim().toUpperCase()]; if(!p) return;
+    temSetor[p] = 1;
+    if(incl[String(l[0])]) get(p, String(l[0])).inv += l[2];
+  });
+  const itens = Object.keys(agg).map(function(k){ return agg[k]; }).filter(function(a){ return a.inv || a.req || a.vend; })
+    .map(function(a){ const o = cat[a.cod]; return [a.p, a.cod, o.n, o.u, Math.round((o.cu||0)*10000)/10000, Math.round(a.inv*1000)/1000, Math.round(a.req*1000)/1000, Math.round(a.vend*1000)/1000]; });
+  itens.sort(function(a,b){ return (a[0] - b[0]) || String(a[2]).localeCompare(String(b[2])); });
+  return {
+    chave:mes, rotulo:confRotuloMes(mes), ini:confDataBR(confPrimeiroDia(mes)), fim:confDataBR(confUltimoDia(mes)),
+    invIso:abre.data, invData:confDataBR(abre.data), fimIso:confUltimoDia(mes), dias:confDiasMes(mes),
+    fonte:'vendas ' + (vend.arquivo || '') + ' · requisições ' + (req.arquivo || ''),
+    pdvs:pdvs, semInv:pdvs.filter(function(p){ return !temSetor[p]; }), itens:itens, sem:sem, novos:novos,
+    ccFora:Object.keys(ign), vendasAte:vend.fim ? confDataBR(vend.fim) : '', vendasAteIso:vend.fim || '', computado:true
+  };
+}
+
+/* ---------- carga do servidor ---------- */
+async function confLerChave(k){
+  try{ const t = await lerGrande(k); return t ? JSON.parse(t) : null; }
+  catch(e){ console.error('estoque:', k, e); return null; }
+}
+function confInvDe(iso){ return CONF_C.inv[iso] || CONF_INV_BASE[iso] || null; }
+function confRecalcular(mes){
+  const C = CONF_C, ab = confUltimoDia(confMesAnterior(mes)), fm = confUltimoDia(mes);
+  let E = confMontar(mes, C.vendas[mes], C.req[mes], confInvDe(ab), confInvDe(fm));
+  if(E.faltam && mes === CONF_BASE.chave) E = CONF_BASE;       // setembro: sem arquivos novos, vale a carga inicial
+  C.periodo[mes] = E;
+}
+async function confCarregarMes(mes){
+  const C = CONF_C; if(C.carregando[mes] || C.carregado[mes]) return;
+  C.carregando[mes] = true;
+  const ab = confUltimoDia(confMesAnterior(mes)), fm = confUltimoDia(mes);
+  const r = await Promise.all([confLerChave('estoque:vendas:' + mes), confLerChave('estoque:req:' + mes), confLerChave(CONF_CHAVE_INV(ab)),
+                               confLerChave(CONF_CHAVE_INV(fm)), confLerChave('estoque:contagem:' + mes)]);
+  if(r[0]) C.vendas[mes] = r[0]; if(r[1]) C.req[mes] = r[1]; if(r[2]) C.inv[ab] = r[2]; if(r[3]) C.inv[fm] = r[3];
+  C.manual[mes] = Object.assign({}, r[4] || {}, C.manual[mes] || {});
+  C.carregando[mes] = false; C.carregado[mes] = true;
+  confRecalcular(mes);
+  renderConfEstoque();
+}
+function CONF_CHAVE_INV(iso){ return 'estoque:inv:' + iso; }
+async function confCarregarIndice(){
+  if(CONF_INDICE_OK) return; CONF_INDICE_OK = true;
+  const idx = await confLerChave('estoque:meses');
+  if(Array.isArray(idx)) idx.forEach(function(m){ if(/^\d{4}-\d{2}$/.test(m) && CONF_MESES.indexOf(m) < 0) CONF_MESES.push(m); });
+  CONF_MESES.sort();
+  if(!CONF_ESCOLHEU) CONF_MES = CONF_MESES[CONF_MESES.length - 1];
+  confCarregarMes(CONF_MES);
+  renderConfEstoque();
+}
+async function confRegistrarMes(mes){
+  const idx = (await confLerChave('estoque:meses')) || [];
+  if(idx.indexOf(mes) < 0) idx.push(mes);
+  idx.sort();
+  await salvarChave('estoque:meses', JSON.stringify(idx), 'meses da conferência de estoque');
+  if(CONF_MESES.indexOf(mes) < 0){ CONF_MESES.push(mes); CONF_MESES.sort(); }
+}
+function confManual(mes){ return CONF_C.manual[mes || CONF_MES] || (CONF_C.manual[mes || CONF_MES] = {}); }
+
+/* Relê o servidor antes de gravar e mescla: quem ajustar com a tela aberta há horas
+   não apaga o que outra pessoa ajustou nesse meio tempo. */
+async function confSalvarContagem(mes, cod, valor){
+  const chave = 'estoque:contagem:' + mes;
+  const srv = (await confLerChave(chave)) || {};
+  const base = Object.assign({}, confManual(mes), srv);
+  if(valor === null) delete base[cod]; else base[cod] = valor;
+  CONF_C.manual[mes] = base;
+  const ok = await salvarChave(chave, JSON.stringify(base), 'contagem de estoque');
+  if(ok) showToast(valor === null ? 'Volta a valer a contagem do inventário' : 'Ajuste gravado');
+}
+
+/* ---------- cálculo das linhas ---------- */
+function confPeriodoAtual(){
+  const mes = CONF_MES, P = CONF_C.periodo[mes];
+  if(P !== undefined) return P;
+  return mes === CONF_BASE.chave ? CONF_BASE : null;           // null = ainda carregando
+}
+function confContagemPDV(E){
+  const snap = confInvDe(E.fimIso); if(!snap) return null;
+  const m = {};
+  (snap.linhas || []).forEach(function(l){
+    const pdv = CONF_SETOR_PDV[String(l[1]).trim().toUpperCase()]; if(!pdv) return;
+    const cod = String(l[0]);
+    if(!m[cod]) m[cod] = {};
+    m[cod][pdv] = (m[cod][pdv] || 0) + (Number(l[2]) || 0);
+  });
+  return m;
+}
+function confLinhas(E, modo){
+  const ct = confContagemPDV(E), man = confManual(E.chave);
   const tol = (parseFloat((document.getElementById('conf-tol')||{}).value)||0)/100;
   let base = [];
   if(modo === 'pdv'){
+    const visto = {}, cat = {};
     E.itens.forEach(function(a){
-      const p = E.pdvs[a[0]];
+      const p = E.pdvs[a[0]]; visto[a[1]+'|'+p] = 1; cat[a[1]] = a;
       base.push({ pdv:p, cod:a[1], nome:a[2], un:a[3], cu:a[4], inv:a[5], req:a[6], vend:a[7], semInv:E.semInv.indexOf(p)>=0 });
+    });
+    if(ct) Object.keys(ct).forEach(function(cod){            // PDV com saldo mas sem movimento no mês
+      const a = cat[cod]; if(!a) return;
+      Object.keys(ct[cod]).forEach(function(p){
+        if(ct[cod][p] > 0 && !visto[cod+'|'+p])
+          base.push({ pdv:p, cod:cod, nome:a[2], un:a[3], cu:a[4], inv:0, req:0, vend:0, semInv:E.semInv.indexOf(p)>=0 });
+      });
     });
   }else{
     const m = {};
@@ -10491,89 +10897,232 @@ function confLinhas(modo){
   base.forEach(function(r){
     r.esp = Math.round((r.inv + r.req - r.vend)*1000)/1000;
     r.cob = (r.vend > 0 && r.esp > 0) ? r.esp / (r.vend / E.dias) : null;
-    const c = (modo === 'cons') ? CONF_CONTAGEM[r.cod] : null;
-    r.cont = (c === undefined || c === null || c === '' || isNaN(Number(c))) ? null : Number(c);
-    r.dif = r.cont === null ? null : Math.round((r.cont - r.esp)*1000)/1000;
-    const tAbs = Math.max(1, tol * (r.inv + r.req));
-    if(r.cont !== null){
-      if(Math.abs(r.dif) <= tAbs)      r.st = { k:'ok',    t:'Confere', r:6 };
-      else if(r.dif < 0)               r.st = { k:'falta', t:'Falta ' + confN(-r.dif), r:1 };
-      else                             r.st = { k:'sobra', t:'Sobra ' + confN(r.dif), r:2 };
-    }else if(r.esp < -0.0001){
-      r.st = (modo === 'pdv' && r.semInv) ? { k:'seminv', t:'Sem inventário inicial', r:4 }
-                                          : { k:'neg', t:'Vendeu mais do que entrou', r:0 };
-    }else if(r.cob !== null && r.cob > CONF_COB_ALTA){
-      r.st = { k:'alto', t:'Estoque esperado alto', r:3 };
+    if(modo === 'cons'){
+      const porPdv = ct ? (ct[r.cod] || {}) : null;
+      r.contInv = porPdv ? Object.keys(porPdv).reduce(function(t,p){ return t + porPdv[p]; }, 0) : null;
+      const m = man[r.cod];
+      r.manual = !(m === undefined || m === null || m === '' || isNaN(Number(m)));
+      r.cont = r.manual ? Number(m) : r.contInv;                      // null = sem contagem
+      r.dif = r.cont === null ? null : Math.round((r.cont - r.esp)*1000)/1000;
+      const tAbs = Math.max(1, tol * (r.inv + r.req));
+      if(r.cont !== null){
+        if(Math.abs(r.dif) <= tAbs)  r.st = { k:'ok',    t:'Confere', r:6 };
+        else if(r.dif < 0)           r.st = { k:'falta', t:'Falta ' + confN(-r.dif), r:1 };
+        else                         r.st = { k:'sobra', t:'Sobra ' + confN(r.dif), r:2 };
+      }else if(r.esp < -0.0001)                          r.st = { k:'neg', t:'Vendeu mais do que entrou', r:0 };
+      else if(r.cob !== null && r.cob > CONF_COB_ALTA)   r.st = { k:'alto', t:'Estoque esperado alto', r:3 };
+      else                                               r.st = { k:'espera', t:'Aguardando contagem', r:5 };
     }else{
-      r.st = { k:'espera', t:(modo === 'cons' ? 'Aguardando contagem' : '—'), r:5 };
+      /* por PDV a contagem é só informativa: a requisição não segue o PDV que vendeu, então diferença por PDV enganaria */
+      r.cont = ct ? ((ct[r.cod] && ct[r.cod][r.pdv]) || 0) : null;
+      r.dif = null;
+      if(r.esp < -0.0001)                              r.st = r.semInv ? { k:'seminv', t:'Sem inventário inicial', r:4 } : { k:'neg', t:'Vendeu mais do que entrou', r:0 };
+      else if(r.cob !== null && r.cob > CONF_COB_ALTA) r.st = { k:'alto', t:'Estoque esperado alto', r:3 };
+      else                                             r.st = { k:'espera', t:'—', r:5 };
     }
-    r.unid = r.st.k === 'neg' ? -r.esp : ((r.st.k === 'falta' || r.st.k === 'sobra') ? Math.abs(r.dif) : 0);
+    r.unid = (r.st.k === 'neg') ? -r.esp : ((r.st.k === 'falta' || r.st.k === 'sobra') ? Math.abs(r.dif) : 0);
     r.imp = r.unid * (r.cu || 0);
   });
   return base;
 }
-
 function confCor(k){ return { neg:'red', falta:'red', sobra:'amber', alto:'amber', seminv:'amber', espera:'gray', ok:'green' }[k] || 'gray'; }
 
-async function confCarregar(){
-  if(CONF_CARREGADO) return;
-  CONF_CARREGADO = true;
-  try{
-    const t = await lerGrande(CONF_CHAVE);
-    if(t){ const o = JSON.parse(t); if(o && typeof o === 'object') CONF_CONTAGEM = Object.assign({}, o, CONF_CONTAGEM); }
-  }catch(e){ console.error('contagem de estoque:', e); }
+/* ---------- upload: lê, mostra a prévia e só grava quando a pessoa confirma ---------- */
+function confQuem(){ return (typeof currentUserName !== 'undefined' && currentUserName) || (typeof currentUserEmail !== 'undefined' && currentUserEmail) || ''; }
+function confBotoesPrevia(ok){
+  return '<div style="margin-top:.6rem;"><button class="btn sm gold" id="conf-aplicar" type="button"' + (ok ? '' : ' disabled') + '>Aplicar</button> ' +
+         '<button class="btn sm secondary" id="conf-cancelar" type="button">Cancelar</button></div>';
+}
+function confPreviaErro(box, nome, msg){
+  box.style.display = 'block';
+  box.innerHTML = '<strong style="color:var(--red)">Não deu para ler ' + confE(nome) + '.</strong> ' + confE(msg) +
+    ' <button class="btn sm secondary" id="conf-cancelar" type="button" style="margin-left:.6rem;">Fechar</button>';
+}
+function confPreviaMsg(){
+  const p = CONF_PENDENTE; if(!p) return;
+  const el = document.getElementById('conf-previa-msg'); if(!el) return;
+  if(p.tipo === 'inv'){
+    const iso = (document.getElementById('conf-data-inv')||{}).value || '';
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(iso)){ el.innerHTML = '<strong style="color:var(--red)">Informe a data do inventário.</strong>'; return; }
+    if(!confEhFimDeMes(iso)){ el.innerHTML = '<strong style="color:var(--red)">' + confE(confDataBR(iso)) + ' não é o último dia do mês.</strong> O quadro só usa inventário de fim de mês (fecha esse mês e abre o seguinte). Confira a data.'; return; }
+    const mes = iso.slice(0,7), prox = (function(){ const d = new Date(Date.UTC(+mes.slice(0,4), +mes.slice(5), 1)); return d.toISOString().slice(0,7); })();
+    const aj = Object.keys(confManual(mes)).length;
+    el.innerHTML = 'Fecha o quadro de <strong>' + confE(confRotuloMes(mes)) + '</strong> e abre o de <strong>' + confE(confRotuloMes(prox)) + '</strong>.' +
+      (confInvDe(iso) ? ' Já existe um inventário desta data: <strong>será substituído</strong>.' : '') +
+      (aj ? ' Os <strong>' + aj + ' ajuste(s) feitos à mão</strong> em ' + confE(confRotuloMes(mes)) + ' serão descartados.' : '');
+  }else{
+    const mes = p.tipo === 'vendas' ? (document.getElementById('conf-mes-up')||{}).value : (document.getElementById('conf-mes-up')||{}).value;
+    if(!/^\d{4}-\d{2}$/.test(mes || '')){ el.innerHTML = '<strong style="color:var(--red)">Informe o mês.</strong>'; return; }
+    const ja = p.tipo === 'vendas' ? CONF_C.vendas[mes] : CONF_C.req[mes];
+    el.innerHTML = 'Vai alimentar o quadro de <strong>' + confE(confRotuloMes(mes)) + '</strong>.' + (ja ? ' Já havia ' + (p.tipo === 'vendas' ? 'vendas' : 'requisições') + ' deste mês (<strong>' + confE(ja.arquivo || '') + '</strong>): serão substituídas.' : '');
+  }
+}
+async function confMostrarPrevia(tipo, nome, r){
+  const box = document.getElementById('conf-previa');
+  CONF_PENDENTE = null;
+  if(r.erro){ confPreviaErro(box, nome, r.erro); return; }
+  box.style.display = 'block';
+  if(tipo === 'inv'){
+    CONF_PENDENTE = { tipo:tipo, arquivo:nome, linhas:r.linhas };
+    const porSetor = {}; r.linhas.forEach(function(l){ porSetor[l.setor] = (porSetor[l.setor]||0) + 1; });
+    const ok = Object.keys(porSetor).filter(function(s){ return CONF_SETOR_PDV[s]; });
+    const fora = Object.keys(porSetor).filter(function(s){ return !CONF_SETOR_PDV[s]; });
+    const iso = confDataDoNome(nome) || '';
+    box.innerHTML = '<div><strong>' + confE(nome) + '</strong> — inventário, ' + r.linhas.length + ' linhas' + (r.ignoradas.length ? ' (' + r.ignoradas.length + ' ignorada(s) por quantidade inválida)' : '') + '.</div>' +
+      '<div style="margin:.4rem 0;">Setores que entram na conferência: <strong>' + (ok.map(function(s){ return confE(s) + ' (' + porSetor[s] + ')'; }).join(', ') || 'nenhum') + '</strong>' +
+        (fora.length ? '. Ficam de fora: ' + fora.map(function(s){ return confE(s) + ' (' + porSetor[s] + ')'; }).join(', ') : '') + '.</div>' +
+      '<div>Produto que não aparece no arquivo conta como <strong>estoque zero</strong>.</div>' +
+      (ok.length ? '' : '<div style="color:var(--red);margin-top:.3rem;"><strong>Nenhum setor reconhecido.</strong> Esperado: ' + Object.keys(CONF_SETOR_PDV).join(', ') + '.</div>') +
+      '<div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin:.6rem 0 .3rem;"><label style="margin:0;">Data do inventário</label>' +
+        '<input type="date" id="conf-data-inv" value="' + iso + '" style="width:auto;margin:0;"></div>' +
+      '<div id="conf-previa-msg"></div>' + confBotoesPrevia(ok.length > 0);
+  }else if(tipo === 'vendas'){
+    const meses = Object.keys(r.meses).sort();
+    const maior = meses.slice().sort(function(a,b){ return r.meses[b].n - r.meses[a].n; })[0];
+    CONF_PENDENTE = { tipo:tipo, arquivo:nome, meses:r.meses };
+    const locais = {}; Object.keys(r.meses[maior].agg).forEach(function(k){ const a = r.meses[maior].agg[k]; locais[a.local] = (locais[a.local]||0) + a.qtd; });
+    const desc = Object.keys(locais).map(function(l){ return confE(l) + (confPdvConhecidoVenda(l) ? '' : ' <em>(novo: entra como PDV próprio, sem inventário)</em>'); }).join(', ');
+    box.innerHTML = '<div><strong>' + confE(nome) + '</strong> — vendas, ' + confN(r.lidas, 0) + ' linhas' + (r.semData ? ' (' + r.semData + ' sem data foram ignoradas)' : '') + '.</div>' +
+      '<div style="margin:.4rem 0;">Locais de venda: ' + desc + '.</div>' +
+      '<div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin:.6rem 0 .3rem;"><label style="margin:0;">Mês a carregar</label>' +
+        '<select id="conf-mes-up" style="width:auto;margin:0;">' + meses.map(function(m){ const M = r.meses[m];
+          return '<option value="' + m + '"' + (m === maior ? ' selected' : '') + '>' + confE(confRotuloMes(m)) + ' — ' + confN(M.n,0) + ' linhas, ' + confE(confDataBR(M.ini).slice(0,5)) + ' a ' + confE(confDataBR(M.fim).slice(0,5)) + '</option>'; }).join('') +
+        '</select></div><div id="conf-previa-msg"></div>' + confBotoesPrevia(true);
+  }else{
+    CONF_PENDENTE = { tipo:tipo, arquivo:nome, linhas:r.linhas };
+    const dentro = Object.keys(r.ccs).filter(function(c){ return CONF_CC_PDV[normNome(c)]; });
+    const fora = Object.keys(r.ccs).filter(function(c){ return !CONF_CC_PDV[normNome(c)]; });
+    box.innerHTML = '<div><strong>' + confE(nome) + '</strong> — requisições, ' + confN(r.lidas, 0) + ' linhas.</div>' +
+      '<div style="margin:.4rem 0;">Centros de custo que entram: <strong>' + (dentro.map(function(c){ return confE(c) + ' (' + r.ccs[c] + ')'; }).join(', ') || 'nenhum') + '</strong>' +
+        (fora.length ? '. Ficam de fora: ' + fora.map(function(c){ return confE(c) + ' (' + r.ccs[c] + ')'; }).join(', ') : '') + '.</div>' +
+      '<div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin:.6rem 0 .3rem;"><label style="margin:0;">Mês das requisições</label>' +
+        '<input type="month" id="conf-mes-up" value="' + CONF_MES + '" style="width:auto;margin:0;"></div><div id="conf-previa-msg"></div>' + confBotoesPrevia(dentro.length > 0);
+  }
+  confPreviaMsg();
+}
+async function confAplicar(){
+  const p = CONF_PENDENTE; if(!p) return;
+  const btn = document.getElementById('conf-aplicar'); if(btn){ btn.disabled = true; btn.textContent = 'Gravando...'; }
+  const reabilita = function(){ if(btn){ btn.disabled = false; btn.textContent = 'Aplicar'; } };
+  const meta = { arquivo:p.arquivo, por:confQuem(), em:new Date().toISOString() };
+  let mesAlvo = CONF_MES;
+  if(p.tipo === 'inv'){
+    const iso = (document.getElementById('conf-data-inv')||{}).value || '';
+    if(!confEhFimDeMes(iso)){ showToast('A data precisa ser o último dia do mês'); reabilita(); return; }
+    const snap = Object.assign({ data:iso }, meta, { linhas:p.linhas.map(function(l){ return [l.cod, l.setor, l.qtd, l.nome, l.un, l.valor]; }) });
+    if(!(await salvarChave(CONF_CHAVE_INV(iso), JSON.stringify(snap), 'inventário de ' + confDataBR(iso)))){ reabilita(); return; }
+    CONF_C.inv[iso] = snap;
+    const mFecha = iso.slice(0,7);
+    if(Object.keys(confManual(mFecha)).length){ CONF_C.manual[mFecha] = {}; await salvarChave('estoque:contagem:' + mFecha, '{}', 'contagem de estoque'); }
+    const prox = new Date(Date.UTC(+mFecha.slice(0,4), +mFecha.slice(5), 1)).toISOString().slice(0,7);
+    Object.keys(CONF_C.carregado).forEach(function(m){ if(m === mFecha || m === prox) confRecalcular(m); });
+    mesAlvo = CONF_MES;
+    showToast('Inventário de ' + confDataBR(iso) + ' gravado');
+  }else{
+    const mes = (document.getElementById('conf-mes-up')||{}).value || '';
+    if(!/^\d{4}-\d{2}$/.test(mes)){ showToast('Informe o mês'); reabilita(); return; }
+    let obj, chave, rotulo;
+    if(p.tipo === 'vendas'){
+      const M = p.meses[mes]; if(!M){ showToast('Esse mês não está no arquivo'); reabilita(); return; }
+      obj = Object.assign({ mes:mes, ini:M.ini, fim:M.fim }, meta, { linhas:Object.keys(M.agg).map(function(k){ const a = M.agg[k];
+        return [a.local, a.cod, a.desc, a.grupo, Math.round(a.qtd*1000)/1000, Math.round(a.valor*100)/100]; }) });
+      chave = 'estoque:vendas:' + mes; rotulo = 'vendas de ' + confRotuloMes(mes);
+    }else{
+      obj = Object.assign({ mes:mes }, meta, { linhas:p.linhas.map(function(a){ return [a.cc, a.cod, a.nome, a.un, Math.round(a.qtd*1000)/1000, Math.round(a.vt*100)/100]; }) });
+      chave = 'estoque:req:' + mes; rotulo = 'requisições de ' + confRotuloMes(mes);
+    }
+    if(!(await salvarChave(chave, JSON.stringify(obj), rotulo))){ reabilita(); return; }
+    await confRegistrarMes(mes);
+    if(p.tipo === 'vendas') CONF_C.vendas[mes] = obj; else CONF_C.req[mes] = obj;
+    if(!CONF_C.carregado[mes]){ CONF_C.carregado[mes] = false; CONF_C.carregando[mes] = false; await confCarregarMes(mes); }
+    confRecalcular(mes);
+    CONF_MES = mes; CONF_ESCOLHEU = true; mesAlvo = mes;
+    showToast(rotulo.charAt(0).toUpperCase() + rotulo.slice(1) + ' gravadas');
+  }
+  CONF_PENDENTE = null;
+  document.getElementById('conf-previa').style.display = 'none';
   renderConfEstoque();
 }
 
-/* Relê o servidor antes de gravar e mescla: quem digitar com a tela aberta há horas
-   não apaga o que outra pessoa contou nesse meio tempo. */
-async function confSalvarContagem(cod, valor){
-  let base = Object.assign({}, CONF_CONTAGEM);
-  try{
-    const t = await lerGrande(CONF_CHAVE);
-    if(t){ const o = JSON.parse(t); if(o && typeof o === 'object') base = Object.assign({}, base, o); }
-  }catch(e){}
-  if(valor === null) delete base[cod]; else base[cod] = valor;
-  CONF_CONTAGEM = base;
-  const ok = await salvarChave(CONF_CHAVE, JSON.stringify(base), 'contagem de estoque');
-  if(ok) showToast(valor === null ? 'Contagem removida' : 'Contagem gravada');
+/* ---------- tela ---------- */
+function confLinhaFonte(ok, rotulo, det){
+  return '<div style="margin:.1rem 0;"><span class="badge ' + (ok ? 'green' : 'red') + '" style="margin-left:0;">' + (ok ? '✓' : '✗') + ' ' + confE(rotulo) + '</span> <span>' + det + '</span></div>';
+}
+function confFontes(E, mes){
+  const C = CONF_C, ab = confUltimoDia(confMesAnterior(mes)), fm = confUltimoDia(mes);
+  const quando = function(o){ return o.por === 'carga inicial' ? 'carga inicial' : 'subido por ' + confE(o.por || '—') + ' em ' + confE(new Date(o.em).toLocaleString('pt-BR')); };
+  const base = (mes === CONF_BASE.chave && (!E || E === CONF_BASE));
+  let h = '';
+  const v = C.vendas[mes], r = C.req[mes];
+  h += confLinhaFonte(!!v || base, 'Vendas', v ? confE(v.arquivo) + ' · ' + confE(confDataBR(v.ini).slice(0,5)) + ' a ' + confE(confDataBR(v.fim).slice(0,5)) + ' · ' + quando(v) : (base ? 'carga inicial (' + confE(CONF_BASE.fonte) + ')' : 'ainda não enviado'));
+  h += confLinhaFonte(!!r || base, 'Requisições', r ? confE(r.arquivo) + ' · ' + quando(r) : (base ? 'carga inicial (' + confE(CONF_BASE.fonte) + ')' : 'ainda não enviado'));
+  const a = confInvDe(ab);
+  h += confLinhaFonte(!!a || base, 'Inventário de abertura ' + confDataBR(ab).slice(0,5), a ? confE(a.arquivo) + ' · ' + quando(a) : (base ? 'carga inicial (' + confE(CONF_BASE.fonte) + ')' : 'ainda não enviado'));
+  const f = confInvDe(fm);
+  h += confLinhaFonte(!!f, 'Inventário de fechamento ' + confDataBR(fm).slice(0,5), f ? confE(f.arquivo) + ' · ' + quando(f) : 'ainda não enviado (sem ele o quadro só mostra o esperado)');
+  return h;
 }
 
 function renderConfEstoque(){
   const tb = document.getElementById('conf-tbody'); if(!tb) return;
-  if(!CONF_CARREGADO) confCarregar();
-  const E = CONF_ESTOQUE;
+  if(!CONF_INDICE_OK) confCarregarIndice();
+  if(!CONF_C.carregado[CONF_MES] && !CONF_C.carregando[CONF_MES]) confCarregarMes(CONF_MES);
   const modo = document.getElementById('conf-modo').value;
+  const selM = document.getElementById('conf-mes');
+  selM.innerHTML = CONF_MESES.slice().sort().reverse().map(function(m){ return '<option value="' + m + '"' + (m === CONF_MES ? ' selected' : '') + '>' + confE(confRotuloMes(m)) + '</option>'; }).join('');
   const selP = document.getElementById('conf-pdv');
-  if(!selP.dataset.pronto){
-    selP.innerHTML = '<option value="">Todos os pontos de venda</option>' + E.pdvs.map(function(p){ return '<option value="'+confE(p)+'">'+confE(p)+'</option>'; }).join('');
-    selP.dataset.pronto = '1';
+  const E = confPeriodoAtual();
+  document.getElementById('conf-fontes').innerHTML = confFontes(E, CONF_MES);
+  const vazio = function(msg){
+    document.getElementById('conf-kpis').innerHTML = '';
+    document.getElementById('conf-aviso').innerHTML = msg;
+    document.getElementById('conf-thead').innerHTML = '';
+    tb.innerHTML = '';
+    document.getElementById('conf-rodape').textContent = '';
+    document.getElementById('conf-sem-n').textContent = '0 produtos'; document.getElementById('conf-sem-tbody').innerHTML = '';
+    document.getElementById('conf-novos').innerHTML = '';
+  };
+  if(E === null){ document.getElementById('conf-periodo').textContent = confRotuloMes(CONF_MES); vazio('Carregando os dados de ' + confE(confRotuloMes(CONF_MES)) + '...'); return; }
+  if(E.faltam){
+    document.getElementById('conf-periodo').textContent = confRotuloMes(CONF_MES);
+    vazio('Para montar o quadro de <strong>' + confE(confRotuloMes(CONF_MES)) + '</strong> ainda faltam: <strong>' + E.faltam.map(confE).join(', ') + '</strong>. Use os botões acima.');
+    return;
   }
+  selP.innerHTML = '<option value="">Todos os pontos de venda</option>' + E.pdvs.map(function(p){ return '<option value="'+confE(p)+'"' + (selP.value === p ? ' selected' : '') + '>'+confE(p)+'</option>'; }).join('');
   selP.parentNode.style.display = modo === 'pdv' ? '' : 'none';
-  document.getElementById('conf-periodo').textContent = E.ini + ' a ' + E.fim + ' (inventário inicial de ' + E.invData + ')';
+  document.getElementById('conf-periodo').textContent = E.rotulo + ': ' + E.ini + ' a ' + E.fim + ' (inventário inicial de ' + E.invData + ')';
 
   /* ---- indicadores: sempre do consolidado ---- */
-  const cons = confLinhas('cons');
-  const nNeg = cons.filter(function(r){ return r.st.k === 'neg'; });
-  const nAlto = cons.filter(function(r){ return r.st.k === 'alto'; });
-  const nCont = cons.filter(function(r){ return r.cont !== null; });
-  const nDif = cons.filter(function(r){ return r.st.k === 'falta' || r.st.k === 'sobra'; });
+  const cons = confLinhas(E, 'cons');
+  const por = function(k){ return cons.filter(function(r){ return r.st.k === k; }); };
   const soma = function(a){ return a.reduce(function(t,r){ return t + r.imp; }, 0); };
   const kpi = function(n, lbl, cor){ return '<div class="stat"><div class="num"'+(cor?' style="color:var(--'+cor+')"':'')+'>'+n+'</div><div class="lbl">'+lbl+'</div></div>'; };
-  document.getElementById('conf-kpis').innerHTML =
-    kpi(cons.length, 'produtos na conferência', '') +
-    kpi(nNeg.length, 'venderam mais do que entrou' + (nNeg.length ? '<br>' + confBRL(soma(nNeg)) + ' em jogo' : ''), nNeg.length ? 'red' : 'green') +
-    kpi(nAlto.length, 'com estoque esperado alto<br>(mais de ' + CONF_COB_ALTA + ' dias de venda)', nAlto.length ? 'amber' : 'green') +
-    kpi(nCont.length + '/' + cons.length, 'com contagem de ' + E.fim.slice(0,5) + ' informada', '') +
-    kpi(nDif.length, 'com diferença na contagem' + (nDif.length ? '<br>' + confBRL(soma(nDif)) + ' em jogo' : ''), nDif.length ? 'red' : (nCont.length ? 'green' : ''));
+  const nCont = cons.filter(function(r){ return r.cont !== null; }).length;
+  const ok = por('ok'), falta = por('falta'), sobra = por('sobra'), neg = por('neg'), alto = por('alto');
+  document.getElementById('conf-kpis').innerHTML = nCont
+    ? kpi(cons.length, 'produtos na conferência', '') + kpi(ok.length, 'conferem<br>(dentro da tolerância)', 'green') +
+      kpi(falta.length, 'com falta<br>' + confBRL(soma(falta)) + ' em jogo', falta.length ? 'red' : 'green') +
+      kpi(sobra.length, 'com sobra<br>' + confBRL(soma(sobra)) + ' em jogo', sobra.length ? 'amber' : 'green') +
+      kpi(Math.round(100 * ok.length / Math.max(1, cons.length)) + '%', 'dos produtos fecham a conta', '')
+    : kpi(cons.length, 'produtos na conferência', '') +
+      kpi(neg.length, 'venderam mais do que entrou' + (neg.length ? '<br>' + confBRL(soma(neg)) + ' em jogo' : ''), neg.length ? 'red' : 'green') +
+      kpi(alto.length, 'com estoque esperado alto<br>(mais de ' + CONF_COB_ALTA + ' dias de venda)', alto.length ? 'amber' : 'green') +
+      kpi('—', 'suba o inventário de ' + E.fim.slice(0,5) + ' para ver faltas e sobras', '');
 
-  document.getElementById('conf-aviso').innerHTML = modo === 'cons'
-    ? '<strong>Visão consolidada:</strong> soma de todos os pontos de venda. É a leitura confiável, porque a requisição é lançada em um único centro de custo por item. A coluna <strong>Contagem</strong> é editável: digite o total contado em ' + confE(E.fim) + ' e tecle Enter.'
-    : '<strong>Atenção:</strong> cada item é requisitado em um só centro de custo (ex.: toda a água sem gás foi para Sala Damasco), mas vende em vários PDVs. Por isso um PDV pode aparecer com saldo negativo só porque consumiu o que foi requisitado em outro. Use esta visão para localizar o movimento, e a consolidada para concluir. ' +
-      'Bar Academia inclui as vendas da Sauna. Sala Damasco, Bar Carteado e Buffet Social não têm inventário de ' + confE(E.invData) + ' no arquivo.';
+  let aviso = modo === 'cons'
+    ? '<strong>Visão consolidada:</strong> soma de todos os pontos de venda; é a leitura confiável, porque a requisição é lançada em um único centro de custo por item. ' +
+      '<strong>Falta</strong> = saiu do estoque e não foi vendido (evento, cortesia, consumo interno, perda ou venda sem baixa). <strong>Sobra</strong> = tem mais do que a conta explica (requisição lançada com outro nome ou produto trocado). ' +
+      'Para corrigir uma contagem, digite o valor e tecle Enter (apague para voltar ao valor do inventário).'
+    : '<strong>Atenção:</strong> cada item é requisitado em um só centro de custo (ex.: toda a água sem gás foi para Sala Damasco), mas vende em vários PDVs. Por isso um PDV pode aparecer com saldo negativo só porque consumiu o que foi requisitado em outro, e por isso a contagem por PDV é só informativa. ' +
+      'Use esta visão para localizar onde está o estoque e a consolidada para concluir. Bar Academia inclui as vendas da Sauna.' +
+      (E.semInv.length ? ' Sem inventário inicial: ' + E.semInv.map(confE).join(', ') + '.' : '');
+  if(E.computado && E.vendasAteIso && E.vendasAteIso < confUltimoDia(E.chave))
+    aviso += '<br><strong style="color:var(--red);">As vendas enviadas vão só até ' + confE(E.vendasAte) + '</strong>, mas o quadro fecha em ' + confE(E.fim) + '. Suba o mês completo para a conta fechar.';
+  if(E.ccFora && E.ccFora.length) aviso += '<br>Requisições de centros de custo que não são ponto de venda ficam de fora: ' + E.ccFora.map(confE).join(', ') + '.';
+  document.getElementById('conf-aviso').innerHTML = aviso;
 
   /* ---- tabela ---- */
-  let linhas = confLinhas(modo);
+  let linhas = confLinhas(E, modo);
   const q = normNome((document.getElementById('conf-busca').value || '').trim());
   const fSt = document.getElementById('conf-status').value;
   const fPdv = document.getElementById('conf-pdv').value;
@@ -10587,28 +11136,30 @@ function renderConfEstoque(){
   linhas.sort(function(a,b){
     return (a.st.r - b.st.r) || (b.imp - a.imp) || (b.unid - a.unid) || (b.vend - a.vend) || String(a.nome).localeCompare(String(b.nome));
   });
-  const ths = ['Produto'].concat(modo === 'pdv' ? ['PDV'] : [], ['Un.','Inventário ' + E.invData.slice(0,5),'+ Requisições','− Vendas','= Esperado ' + E.fim.slice(0,5)],
-    modo === 'cons' ? ['Contagem ' + E.fim.slice(0,5),'Diferença'] : [], ['Cobertura (dias)','R$ em jogo','Situação']);
-  document.getElementById('conf-thead').innerHTML = '<tr>' + ths.map(function(h, i){
-    return '<th' + (i === 0 || h === 'PDV' || h === 'Situação' || h === 'Un.' ? '' : ' style="text-align:right"') + '>' + confE(h) + '</th>'; }).join('') + '</tr>';
+  const fim5 = E.fim.slice(0,5);
+  const ths = ['Produto'].concat(modo === 'pdv' ? ['PDV'] : [], ['Un.','Inventário ' + E.invData.slice(0,5),'+ Requisições','− Vendas','= Esperado ' + fim5],
+    ['Contagem ' + fim5 + (modo === 'pdv' ? ' (info)' : '')], modo === 'cons' ? ['Diferença'] : [], ['Cobertura (dias)','R$ em jogo','Situação']);
+  document.getElementById('conf-thead').innerHTML = '<tr>' + ths.map(function(h){
+    return '<th' + (h === 'Produto' || h === 'PDV' || h === 'Situação' || h === 'Un.' ? '' : ' style="text-align:right"') + '>' + confE(h) + '</th>'; }).join('') + '</tr>';
   const R = function(v){ return '<td style="text-align:right">' + v + '</td>'; };
   tb.innerHTML = linhas.map(function(r){
     const espCor = r.esp < -0.0001 ? 'color:var(--red);font-weight:bold;' : '';
+    const celCont = modo === 'cons'
+      ? '<td style="text-align:right"><input type="number" step="any" min="0" class="conf-cont" data-cod="' + confE(r.cod) + '" value="' + (r.cont === null ? '' : r.cont) + '"' +
+          ' title="' + (r.manual ? 'Ajustado à mão. No inventário: ' + (r.contInv === null ? 'sem inventário' : confN(r.contInv)) : (r.cont === null ? 'Sem inventário de fechamento (digite para informar)' : 'Valor do inventário (digite para ajustar)')) + '"' +
+          ' style="width:92px;text-align:right;padding:.3rem .4rem;' + (r.manual ? 'border-color:var(--gold);background:#FFF9E8;' : '') + '"></td>'
+      : R(r.cont === null ? '—' : confN(r.cont));
     return '<tr><td>' + confE(r.nome) + '<div class="hint" style="margin:0;">cód. ' + confE(r.cod) + '</div></td>' +
       (modo === 'pdv' ? '<td>' + confE(r.pdv) + '</td>' : '') +
       '<td>' + confE(r.un) + '</td>' + R(confN(r.inv)) + R(confN(r.req)) + R(confN(r.vend)) +
-      '<td style="text-align:right;' + espCor + '">' + confN(r.esp) + '</td>' +
-      (modo === 'cons'
-        ? '<td style="text-align:right"><input type="number" step="any" min="0" class="conf-cont" data-cod="' + confE(r.cod) + '" value="' +
-            (r.cont === null ? '' : r.cont) + '" style="width:92px;text-align:right;padding:.3rem .4rem;"></td>' +
-          R(r.dif === null ? '—' : (r.dif > 0 ? '+' : '') + confN(r.dif))
-        : '') +
+      '<td style="text-align:right;' + espCor + '">' + confN(r.esp) + '</td>' + celCont +
+      (modo === 'cons' ? R(r.dif === null ? '—' : (r.dif > 0 ? '+' : '') + confN(r.dif)) : '') +
       R(r.cob === null ? '—' : confN(r.cob, 0)) +
       R(r.imp > 0 ? confBRL(r.imp) : '—') +
       '<td><span class="badge ' + confCor(r.st.k) + '" style="margin-left:0;">' + confE(r.st.t) + '</span></td></tr>';
   }).join('') || '<tr><td colspan="12" class="empty">Nenhum produto neste filtro.</td></tr>';
-  document.getElementById('conf-rodape').textContent = linhas.length + ' linha(s). Fonte: ' + E.fonte + ' (vendas ' + E.ini + ' a ' + E.fim + ', requisições do mês, inventário de ' + E.invData + '). ' +
-    'Ficam de fora: produtos com elaboração (pratos, drinks, café), destilados vendidos por dose, chope (sai por barril) e insumos de cozinha.';
+  document.getElementById('conf-rodape').textContent = linhas.length + ' linha(s). Fonte: ' + E.fonte + ' (período ' + E.ini + ' a ' + E.fim + ', inventário inicial de ' + E.invData + ').' +
+    ' Ficam de fora: produtos com elaboração (pratos, drinks, café), destilados vendidos por dose, chope (sai por barril) e insumos de cozinha.';
 
   if(CONF_FOCO_PROX >= 0){
     const inps = tb.querySelectorAll('.conf-cont');
@@ -10617,7 +11168,10 @@ function renderConfEstoque(){
     if(alvo){ alvo.focus(); alvo.select(); }
   }
 
-  /* ---- vendidos sem correspondência ---- */
+  /* ---- produtos incluídos sozinhos (para revisar) e vendidos sem correspondência ---- */
+  document.getElementById('conf-novos').innerHTML = (E.novos && E.novos.length)
+    ? '<div class="note" style="margin-top:.8rem;"><strong>' + E.novos.length + ' produto(s) novo(s) entraram sozinhos</strong> porque o nome é idêntico ao do almoxarifado e o código é de bebida/bomboniere. Confira se fazem sentido: ' +
+      E.novos.map(function(x){ return confE(x[1]) + ' (cód. ' + confE(x[0]) + ')'; }).join('; ') + '.</div>' : '';
   document.getElementById('conf-sem-n').textContent = E.sem.length + ' produtos';
   document.getElementById('conf-sem-tbody').innerHTML = E.sem.map(function(x){
     return '<tr><td>' + confE(x[0]) + '</td><td>' + confE(x[1]) + '</td><td>' + confE(x[2]) + '</td>' +
@@ -10626,10 +11180,14 @@ function renderConfEstoque(){
 }
 
 (function ligarConfEstoque(){
-  const ids = ['conf-busca','conf-modo','conf-pdv','conf-status','conf-tol'];
-  ids.forEach(function(id){
+  ['conf-busca','conf-modo','conf-pdv','conf-status','conf-tol'].forEach(function(id){
     const e = document.getElementById(id); if(!e) return;
     e.addEventListener(e.tagName === 'SELECT' ? 'change' : 'input', function(){ try{ renderConfEstoque(); }catch(err){ console.error(err); } });
+  });
+  const sm = document.getElementById('conf-mes');
+  if(sm) sm.addEventListener('change', function(){
+    CONF_MES = sm.value; CONF_ESCOLHEU = true;
+    try{ renderConfEstoque(); }catch(err){ console.error(err); }
   });
   const tb = document.getElementById('conf-tbody');
   if(tb){
@@ -10641,26 +11199,66 @@ function renderConfEstoque(){
     });
     tb.addEventListener('change', async function(ev){
       if(!ev.target.classList.contains('conf-cont')) return;
+      const E = confPeriodoAtual(); if(!E || E.faltam) return;
       const cod = ev.target.dataset.cod;
       const txt = String(ev.target.value).trim().replace(',', '.');
-      const v = txt === '' ? null : Number(txt);
+      let v = txt === '' ? null : Number(txt);
       if(v !== null && (isNaN(v) || v < 0)){ showToast('Digite um número válido'); renderConfEstoque(); return; }
-      if(v === null) delete CONF_CONTAGEM[cod]; else CONF_CONTAGEM[cod] = v;
+      /* valor igual ao do inventário não é ajuste: volta a valer o inventário */
+      const ct = confContagemPDV(E);
+      if(v !== null && ct){
+        const porPdv = ct[cod] || {};
+        const inv = Object.keys(porPdv).reduce(function(t,p){ return t + porPdv[p]; }, 0);
+        if(Math.abs(inv - v) < 0.0005) v = null;
+      }
+      if(v === null) delete confManual(E.chave)[cod]; else confManual(E.chave)[cod] = v;
       renderConfEstoque();
-      await confSalvarContagem(cod, v);
+      await confSalvarContagem(E.chave, cod, v);
     });
+  }
+  /* atalhos de upload: vendas, requisições e inventário */
+  [['vendas','conf-btn-vendas','conf-file-vendas'],['req','conf-btn-req','conf-file-req'],['inv','conf-btn-inv','conf-file-inv']].forEach(function(t){
+    const bu = document.getElementById(t[1]), fi = document.getElementById(t[2]);
+    if(!bu || !fi) return;
+    bu.addEventListener('click', function(){ fi.click(); });
+    fi.addEventListener('change', async function(){
+      const f = fi.files && fi.files[0]; if(!f) return;
+      const box = document.getElementById('conf-previa');
+      box.style.display = 'block'; box.textContent = 'Lendo ' + f.name + '... (arquivo grande pode levar alguns segundos)';
+      try{
+        const lm = await confLerMatriz(f, t[0]);
+        if(lm.erro) await confMostrarPrevia(t[0], f.name, lm);
+        else{
+          const r = t[0] === 'inv' ? confParseInventario(lm.matriz) : (t[0] === 'vendas' ? confParseVendas(lm.matriz) : confParseReq(lm.matriz));
+          await confMostrarPrevia(t[0], f.name + (lm.aba ? ' (aba ' + lm.aba + ')' : ''), r);
+          if(CONF_PENDENTE) CONF_PENDENTE.arquivo = f.name;
+          if(t[0] === 'inv' && CONF_PENDENTE){ const dd = document.getElementById('conf-data-inv'); if(dd && !dd.value){ dd.value = ''; } confPreviaMsg(); }
+        }
+      }catch(err){ console.error(err); confPreviaErro(box, f.name, 'falha ao ler (' + (err && err.message || err) + ')'); }
+      fi.value = '';
+    });
+  });
+  const pv = document.getElementById('conf-previa');
+  if(pv){
+    pv.addEventListener('click', function(ev){
+      if(ev.target.id === 'conf-aplicar') confAplicar();
+      else if(ev.target.id === 'conf-cancelar'){ CONF_PENDENTE = null; pv.style.display = 'none'; }
+    });
+    pv.addEventListener('input', function(ev){ if(ev.target.id === 'conf-data-inv' || ev.target.id === 'conf-mes-up') confPreviaMsg(); });
+    pv.addEventListener('change', function(ev){ if(ev.target.id === 'conf-mes-up') confPreviaMsg(); });
   }
   const bx = document.getElementById('conf-exportar');
   if(bx) bx.addEventListener('click', function(){
-    const E = CONF_ESTOQUE, modo = document.getElementById('conf-modo').value;
+    const E = confPeriodoAtual(); if(!E || E.faltam){ showToast('Não há quadro para exportar neste mês'); return; }
+    const modo = document.getElementById('conf-modo').value;
     const f = function(n){ return String(Math.round((Number(n)||0)*1000)/1000).replace('.', ','); };
-    const linhas = confLinhas(modo).sort(function(a,b){ return (a.st.r - b.st.r) || (b.imp - a.imp) || String(a.nome).localeCompare(String(b.nome)); });
+    const linhas = confLinhas(E, modo).sort(function(a,b){ return (a.st.r - b.st.r) || (b.imp - a.imp) || String(a.nome).localeCompare(String(b.nome)); });
     exportarCSV('conferencia_estoque_' + E.chave + '_' + modo + '.csv',
-      ['Codigo','Produto'].concat(modo === 'pdv' ? ['PDV'] : [], ['Un','Inventario ' + E.invData,'Requisicoes','Vendas','Esperado ' + E.fim],
-        modo === 'cons' ? ['Contagem ' + E.fim,'Diferenca'] : [], ['Cobertura (dias)','R$ em jogo','Situacao']),
+      ['Codigo','Produto'].concat(modo === 'pdv' ? ['PDV'] : [], ['Un','Inventario ' + E.invData,'Requisicoes','Vendas','Esperado ' + E.fim, 'Contagem ' + E.fim],
+        modo === 'cons' ? ['Diferenca'] : [], ['Cobertura (dias)','R$ em jogo','Situacao']),
       linhas.map(function(r){
-        return [r.cod, r.nome].concat(modo === 'pdv' ? [r.pdv] : [], [r.un, f(r.inv), f(r.req), f(r.vend), f(r.esp)],
-          modo === 'cons' ? [r.cont === null ? '' : f(r.cont), r.dif === null ? '' : f(r.dif)] : [],
+        return [r.cod, r.nome].concat(modo === 'pdv' ? [r.pdv] : [], [r.un, f(r.inv), f(r.req), f(r.vend), f(r.esp), r.cont === null ? '' : f(r.cont)],
+          modo === 'cons' ? [r.dif === null ? '' : f(r.dif)] : [],
           [r.cob === null ? '' : f(r.cob), f(r.imp), r.st.t]);
       }));
   });
