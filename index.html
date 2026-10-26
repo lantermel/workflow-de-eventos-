@@ -5850,16 +5850,35 @@ document.getElementById('cardapio-catalogo').addEventListener('click', (e)=>{
 });
 
 /* ---------- ENVIAR SOLICITACAO ---------- */
+/* Trava contra clique repetido: enquanto uma gravação está em andamento, novos cliques são ignorados.
+   Sem isso, cada clique impaciente criava um evento duplicado. */
+let __enviandoSolicitacao = false;
+function __travarEnvio(ligado, rotuloOrc){
+  const bE = document.getElementById('btn-enviar-solicitacao'), bO = document.getElementById('btn-salvar-orcamento');
+  [bE, bO].forEach(b=>{ if(b){ b.disabled = ligado; b.style.opacity = ligado ? '.6' : ''; b.style.cursor = ligado ? 'wait' : ''; } });
+  if(bE && bE.dataset.rotulo === undefined) bE.dataset.rotulo = bE.textContent;
+  if(bO && bO.dataset.rotulo === undefined) bO.dataset.rotulo = bO.textContent;
+  if(ligado){ (rotuloOrc ? bO : bE).textContent = 'Salvando… aguarde'; }
+  else { if(bE) bE.textContent = bE.dataset.rotulo; if(bO) bO.textContent = bO.dataset.rotulo; }
+}
+
 document.getElementById('btn-salvar-orcamento').addEventListener('click', ()=>{
+  if(__enviandoSolicitacao) return;
   window.__salvarComoOrcamento = true;
   document.getElementById('btn-enviar-solicitacao').click();
 });
 
 document.getElementById('btn-enviar-solicitacao').addEventListener('click', async ()=>{
+  if(__enviandoSolicitacao) return;                      // já está gravando: ignora o clique
+  const comoOrcamento = !!window.__salvarComoOrcamento;
+  window.__salvarComoOrcamento = false;                  // não pode "vazar" para o próximo envio
   const nome = document.getElementById('in-nome').value.trim();
   if(!nome){ showToast('Informe o nome do evento'); return; }
   const rat = ratColetar();
   if(!rat) return;              // rateio incompleto: nada é gravado
+  __enviandoSolicitacao = true;
+  __travarEnvio(true, comoOrcamento);
+  try{
   const r = calcular();
   const record = {
     id: uid(),
@@ -5897,18 +5916,29 @@ document.getElementById('btn-enviar-solicitacao').addEventListener('click', asyn
     justificativa: document.getElementById('in-justificativa').value,
     previsto: { headcount:r.totalQty, custoMO:r.totalCustoMO, custoInsumo:r.custoInsumo, rows:r.rows, itens:r.itensPrevisto, produtos:r.produtosPrevisto },
     // "Salvar como orçamento" cria o evento um passo antes da aprovação
-    status: window.__salvarComoOrcamento ? 'Em orçamento' : 'Pendente Aprovador 1',
+    status: comoOrcamento ? 'Em orçamento' : 'Pendente Aprovador 1',
     aprovacao1: null, aprovacao2: null,
     realizado: null
   };
   SOLICITACOES.push(record);
-  await saveSolicitacoes();
-  showModal('Solicitação enviada com sucesso', `"${nome}" foi enviada para aprovação. Primeiro aprovador: Aurélio Felix. Acompanhe o status na aba Relatório.`);
-  renderAprovacoes(); renderAprovExtraList(); renderExecucao(); renderRelatorio(); renderOrcamento();
+  // limpa o nome já: qualquer clique que escape da trava cai em "Informe o nome do evento"
   document.getElementById('in-nome').value='';
   const obsEl = document.getElementById('in-observacao'); if(obsEl) obsEl.value='';
   window.__SERV_APLICADOS = [];
   try{ renderServPrevia(); }catch(e){}
+  await saveSolicitacoes();
+  showModal(comoOrcamento ? 'Orçamento salvo com sucesso' : 'Solicitação enviada com sucesso',
+    comoOrcamento
+      ? `"${nome}" foi salvo como orçamento. Acompanhe na aba Orçamento.`
+      : `"${nome}" foi enviada para aprovação. Primeiro aprovador: Aurélio Felix. Acompanhe o status na aba Relatório.`);
+  renderAprovacoes(); renderAprovExtraList(); renderExecucao(); renderRelatorio(); renderOrcamento();
+  }catch(e){
+    console.error('enviar solicitação:', e);
+    showModal('Não foi possível concluir', 'Ocorreu um erro ao gravar. Confira na aba Relatório se o evento já aparece antes de tentar de novo, para não duplicar.', true);
+  }finally{
+    __enviandoSolicitacao = false;
+    __travarEnvio(false);
+  }
 });
 
 /* ---------- APROVACOES ---------- */
