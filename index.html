@@ -6131,6 +6131,16 @@ function montarRelatorioConf(){
 
   const c = orig.cloneNode(true);
   c.querySelectorAll('.subtle, details, #conf-previa').forEach(e=>e.remove());
+  // A contagem é um campo digitável na tela: leva o valor que está nele (não o campo) para o relatório.
+  const contOrig = {};
+  document.querySelectorAll('#conf-tbody .conf-cont').forEach(i=>{ contOrig[i.dataset.cod] = i.value; });
+  c.querySelectorAll('.conf-cont').forEach(i=>{
+    const v = contOrig[i.dataset.cod];
+    const n = (v === undefined || v === '') ? NaN : parseFloat(v);
+    const td = i.closest('td');
+    if(td){ td.textContent = isNaN(n) ? '—' : confN(n); td.style.textAlign = 'right'; }
+    else i.remove();
+  });
   c.querySelectorAll('button, input, select, textarea, label').forEach(e=>e.remove());
   c.querySelectorAll('div[style*="display:flex"]').forEach(e=>{ if(!e.textContent.trim()) e.remove(); });
   c.querySelectorAll('[style*="max-height"]').forEach(e=>{ e.style.maxHeight = 'none'; e.style.overflow = 'visible'; });
