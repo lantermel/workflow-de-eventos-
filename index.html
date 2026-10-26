@@ -7853,14 +7853,16 @@ function eventoTotalPrevisto(s){
   return ((s.previsto && s.previsto.custoMO) || 0) + custoPrevistoProdutos(s);
 }
 function eventoContaNoPrevisto(s){
-  return !(s.status === 'Rejeitado' || s.status === 'Cancelado' || ehOrcamento(s));
+  return s.status !== 'Rejeitado';   // só os rejeitados ficam fora; Em orçamento e demais status entram
 }
 /* "Soma total previsto do mês": é o valor que o Relatório mostra no rodapé e que o
    Resultado diário do mês corrente usa como eventos a cobrar. */
-function somaTotalPrevistoMes(ym){
+function somaTotalPrevistoMes(ym, ateDia){
   let total = 0, n = 0;
   SOLICITACOES.forEach(s=>{
-    if(!String(s.data||'').startsWith(ym) || !eventoContaNoPrevisto(s)) return;
+    const d = String(s.data||'');
+    if(!d.startsWith(ym) || !eventoContaNoPrevisto(s)) return;
+    if(ateDia && parseInt(d.slice(8,10),10) > ateDia) return;
     total += eventoTotalPrevisto(s); n++;
   });
   return { total, n };
@@ -7963,8 +7965,11 @@ function renderMesCorrente(){
   const corte = ultDiaRec || ultDiaMO;
   const T = c => q.filter(l=>l.dia<=corte).reduce((a,l)=>a+(l[c]||0),0);
 
-  // Eventos a cobrar = soma total prevista do mês inteiro (aba Relatório), não só até o corte
-  const evMes = somaTotalPrevistoMes(ym);
+  // Eventos a cobrar = soma de "Total previsto" do quadro do Relatório, de 01 até ontem (mês corrente)
+  const hojeD = new Date();
+  const ymHoje = hojeD.getFullYear() + '-' + String(hojeD.getMonth()+1).padStart(2,'0');
+  const ateEv = (ym === ymHoje) ? hojeD.getDate() - 1 : mesDias(ym);   // mês corrente: até ontem
+  const evMes = ateEv >= 1 ? somaTotalPrevistoMes(ym, ateEv) : {total:0, n:0};
   const resTot = T('resultado') - T('evento') + evMes.total;
 
   const campoFolha = document.getElementById('mes-folha');
@@ -7979,7 +7984,7 @@ function renderMesCorrente(){
     kpi('Dias com ponto', q.filter(l=>l.origem==='ponto').length) +
     kpi('Dias pelo plano', q.filter(l=>l.origem==='plano').length) +
     kpi('Receita' + (ultDiaRec?' até '+String(ultDiaRec).padStart(2,'0'):''), fmtBRL(T('receita')), 'var(--green)') +
-    kpi('A cobrar de eventos — previsto do mês (' + evMes.n + ')', fmtBRL(evMes.total), 'var(--green)') +
+    kpi('A cobrar de eventos — 01 a ' + String(Math.max(ateEv,1)).padStart(2,'0') + ' (' + evMes.n + ')', fmtBRL(evMes.total), 'var(--green)') +
     kpi('M.O. sobre receita', pctMO===null?'—':pctMO.toFixed(1)+'%', pctMO!==null && pctMO>20?'var(--red)':'var(--green)') +
     kpi('CMV', fmtBRL(T('cmv')), 'var(--red)') +
     kpi('Folha CLT do mês', dd.folha?fmtBRL(dd.folha):'—') +
@@ -8004,7 +8009,7 @@ function renderMesCorrente(){
         ? ' <span style="color:var(--amber)">Ainda falta anexar: <strong>' + falta.join(', ') + '</strong>. ' +
           'A mão de obra já entra sozinha pelos registros de ponto; o resto vem dos arquivos.</span>'
         : ' <span style="color:var(--green)">Todas as fontes lançadas.</span>') +
-      '<br><span style="color:var(--gray)">Eventos a cobrar usa a <strong>Soma total prevista do mês</strong> da aba Relatório: ' + fmtBRL(evMes.total) + ' em ' + evMes.n + ' evento(s), mês inteiro.</span>' +
+      '<br><span style="color:var(--gray)">Eventos a cobrar = soma de <strong>Total previsto</strong> do quadro do Relatório (sem os eventos rejeitados), de 01 a ' + String(Math.max(ateEv,1)).padStart(2,'0') + ': ' + fmtBRL(evMes.total) + ' em ' + evMes.n + ' evento(s).</span>' +
       (dd.em ? ' <span style="color:var(--gray)">Atualizado em ' + new Date(dd.em).toLocaleString('pt-BR') + (dd.por?' por '+dd.por:'') + '.</span>' : '');
     nota.style.background = falta.length ? '#FFF8E1' : 'var(--ice-light)';
   }
@@ -8064,7 +8069,7 @@ function renderMesCorrente(){
     '<td>TOTAL'+(corte?' ATÉ '+String(corte).padStart(2,'0'):'')+'</td>'+
     '<td style="text-align:right">'+fmtBRL(T('receita'))+'</td>'+
     '<td style="text-align:right">'+fmtBRL(T('cmv'))+'</td>'+
-    '<td style="text-align:right" title="Soma total prevista do mês (aba Relatório)">'+fmtBRL(evMes.total)+'</td>'+
+    '<td style="text-align:right" title="Soma de Total previsto do quadro do Relatório, de 01 a '+ateEv+'">'+fmtBRL(evMes.total)+'</td>'+
     '<td style="text-align:right">'+fmtBRL(T('moValor'))+'</td>'+
     '<td style="text-align:right">'+(pctMO===null?'—':pctMO.toFixed(1)+'%')+'</td>'+
     '<td style="text-align:right">'+T('moQtd')+'</td>'+
@@ -8125,11 +8130,23 @@ async function mesAnexarCMV(arquivo){
 const MES_CONTAS_GERAIS = ['409','392','366','364','360','349','339','338','333','331','327','320','319','269','267'];
 
 async function mesAnexarGerais(arquivo){
-  const ym = mesSelecionado();
+  let ym = mesSelecionado();
   try{
     const txt = await setLerTexto(arquivo);
     const linhas = txt.replace(/^\uFEFF/,'').replace(/\r/g,'\n').split('\n').filter(l=>l.trim());
     if(!linhas.length) throw new Error('arquivo vazio');
+    /* A competência vem das datas do arquivo (mês mais frequente), não do seletor:
+       o seletor abre no mês mais recente com eventos, que pode ser o próximo mês. */
+    const cont = {};
+    linhas.forEach(l=>{ const m = /(?:^|[;\t])\s*(\d{2})\/(\d{2})\/(\d{4})/.exec(l); if(m){ const k = m[3]+'-'+m[2]; cont[k] = (cont[k]||0)+1; } });
+    const doArq = Object.keys(cont).sort((a,b)=>cont[b]-cont[a])[0];
+    let trocou = false;
+    if(doArq && doArq !== ym){
+      const sel = document.getElementById('mes-comp');
+      const tem = sel && [...sel.options].some(o=>o.value===doArq);
+      if(!tem) throw new Error('as datas do arquivo são de '+mesRotulo(doArq)+', que não está na lista de competências deste quadro.');
+      sel.value = doArq; ym = doArq; trocou = true;
+    }
     const sep = (linhas.slice(0,5).join('').split(';').length > linhas.slice(0,5).join('').split('\t').length) ? ';' : '\t';
     const porDia = {}; let n = 0, foraMes = 0; const usadas = new Set(); let formato = 'razao';
     const nz = s => normNome(s).replace(/ /g,'');
@@ -8187,7 +8204,7 @@ async function mesAnexarGerais(arquivo){
     const ok = await mesSalvar(ym);
     renderMesCorrente();
     const tot = gerais.reduce((a,x)=>a+x[1],0);
-    mesStat('<strong style="color:var(--green)">Despesas gerais de '+mesRotulo(ym)+' atualizadas'+(ok?' e gravadas para todos':'')+'.</strong> '+
+    mesStat('<strong style="color:var(--green)">Despesas gerais de '+mesRotulo(ym)+(trocou?' (competência selecionada pelas datas do arquivo)':'')+' atualizadas'+(ok?' e gravadas para todos':'')+'.</strong> '+
       n+' lançamento(s) '+(formato==='razao' ? 'em '+usadas.size+' de '+MES_CONTAS_GERAIS.length+' contas' : '(arquivo sem conta contábil: considerei todas as linhas, débito − crédito)')+' · '+fmtBRL(tot)+' até o dia '+String(ate).padStart(2,'0')+'.'+
       (foraMes ? '<br><span style="color:var(--gray)">'+foraMes+' linha(s) de outro mês foram ignoradas.</span>' : ''));
   }catch(e){ mesStat('<strong style="color:var(--red)">Não consegui ler o razão:</strong> '+e.message, true); }
@@ -9157,7 +9174,7 @@ function renderRelatorio(){ return _comMemoProdutos(function(){
   const alvo = relEventosFiltrados();
   const tfRel = document.getElementById('rel-tfoot');
   if(tfRel){
-    /* Soma total previsto por mês (mesma conta do Resultado diário). Rejeitado, cancelado e orçamento ficam fora. */
+    /* Soma total previsto por mês (mesma conta do Resultado diário). Só os rejeitados ficam fora. */
     const porMes = {};
     alvo.forEach(s=>{
       if(!eventoContaNoPrevisto(s)) return;
