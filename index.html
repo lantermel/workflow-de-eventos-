@@ -392,6 +392,13 @@
 /* Setembro foi montado sem o invólucro .mes-corpo, por ser o mês vigente.
    Este recolhimento funciona pelo próprio card, sem mexer na estrutura. */
 .card.recolhido > *:not(h2){ display:none !important; }
+.sino{margin-left:.15rem;}
+.notif-badge{background:#C0392B;color:#fff;border-radius:999px;font-size:.66rem;font-weight:bold;padding:.05rem .4rem;margin-left:.3rem;vertical-align:middle;}
+.notif-card{border:1px solid var(--border);border-radius:8px;padding:.8rem .9rem;margin:.6rem 0;background:#fff;}
+.notif-card.nova{border-left:5px solid var(--gold);background:#FFFBF0;}
+.notif-card h4{margin:0 0 .2rem;font-family:Georgia,serif;color:var(--navy);font-size:.98rem;}
+.notif-guia{background:var(--ice-light);border-radius:6px;padding:.6rem .8rem;margin:.6rem 0;font-size:.86rem;line-height:1.5;}
+.notif-guia ul{margin:.3rem 0 0 1.1rem;padding:0;}
 </style>
 <style id="layout-2niveis">
 /* ===== LAYOUT DE DOIS NÍVEIS: grupos no topo + submenus na lateral ===== */
@@ -916,6 +923,7 @@
       <button class="tab-btn" data-tab="solicitar" data-grupo="fluxo">1. Solicitar</button>
       <button class="tab-btn" data-tab="aprovacoes" data-grupo="fluxo">2. Aprovar</button>
       <button class="tab-btn" data-tab="execucao" data-grupo="fluxo">3. Executar</button>
+      <button class="tab-btn" data-tab="notificacoes" data-grupo="fluxo">4. Notificações <span class="sino">🔔</span><span class="notif-badge" id="notif-badge" style="display:none;">0</span></button>
       <span class="tab-grupo" data-grupo-label="operacao">Operação diária</span>
       <button class="tab-btn" data-tab="maodeobra" data-grupo="operacao">Mão de obra</button>
       <span class="tab-grupo" data-grupo-label="analise">Análise</span>
@@ -1060,6 +1068,19 @@ teresa cristina - teresa.cristina@sirio.org.br"></textarea>
         <p class="subtle">Aqui a equipe de A&amp;B e o solicitante acertam a composição e o preço antes de o evento virar solicitação. Cada envio de A&amp;B congela uma <strong>versão</strong>: o solicitante aceita aquela versão, com data e hora, e é ela que vale quando a conta chegar. Toda a conversa fica registrada no próprio evento, no lugar do e-mail.</p>
         <div id="orc-lista"></div>
         <div class="empty" id="orc-vazio" style="display:none;">Nenhum orçamento em negociação. Crie um na aba <strong>1. Solicitar</strong>, pelo botão "Salvar como orçamento".</div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-notificacoes">
+      <div class="card">
+        <h2>🔔 Notificações dos seus eventos</h2>
+        <p class="subtle">Aqui aparecem os avisos sobre os eventos que você solicitou: nova versão de orçamento, mensagens da equipe de A&amp;B e decisões de aprovação.</p>
+        <div style="margin:.4rem 0 .8rem;">
+          <button class="btn sm secondary" id="notif-atualizar">Atualizar</button>
+          <button class="btn sm secondary" id="notif-todas" style="margin-left:.4rem;">Marcar todas como lidas</button>
+        </div>
+        <div id="notif-lista"></div>
+        <div class="empty" id="notif-vazio" style="display:none;">Nenhuma notificação por enquanto. Quando a equipe de A&amp;B enviar uma versão do orçamento de um evento seu, o aviso aparece aqui.</div>
       </div>
     </div>
 
@@ -1246,8 +1267,11 @@ teresa cristina - teresa.cristina@sirio.org.br"></textarea>
         <div class="empty" id="out-produtos-vazio" style="display:none;">Escolha um cardápio no campo "Cardápio" acima para ver os produtos, quantidades e valores.</div>
 
         <div class="note" id="calc-note"></div>
-        <button class="btn gold" id="btn-enviar-solicitacao">Enviar para aprovação</button>
-        <button class="btn secondary" id="btn-salvar-orcamento" style="margin-left:.5rem;">Salvar como orçamento</button>
+        <!-- O envio direto para aprovação fica oculto: todo evento passa primeiro pelo orçamento.
+             O botão continua no HTML porque "Salvar como orçamento" aciona a mesma rotina de gravação. -->
+        <button class="btn gold" id="btn-enviar-solicitacao" style="display:none;" tabindex="-1" aria-hidden="true">Enviar para aprovação</button>
+        <button class="btn gold" id="btn-salvar-orcamento">Salvar como orçamento</button>
+        <div class="hint" style="text-transform:none;font-weight:normal;margin-top:.5rem;">A equipe de A&amp;B analisa o orçamento e envia uma versão para você. Depois que você aprova, o evento segue para a aprovação final.</div>
       </div>
     </div>
 
@@ -1874,6 +1898,7 @@ teresa cristina - teresa.cristina@sirio.org.br"></textarea>
               <option value="espera">Aguardando contagem</option><option value="ok">Confere</option></select></div>
           <div style="width:110px;"><label>Tolerância (%)</label><input type="number" id="conf-tol" value="2" min="0" step="0.5"></div>
           <div><button class="btn secondary sm" id="conf-exportar" style="margin:0;">Exportar (CSV)</button></div>
+          <div><button class="btn gold sm" id="conf-pdf" style="margin:0;">Relatório PDF</button></div>
         </div>
         <div class="note" id="conf-aviso" style="margin:.2rem 0 .8rem;"></div>
         <div style="overflow-x:auto;max-height:620px;overflow-y:auto;">
@@ -3058,7 +3083,7 @@ let CURRENT_TELAS = null;
 function podeVerAba(tab){
   if(hasRole('admin')) return true;
   if(tab==='funcionarios') return false;      // só administrador
-  if(tab==='inicio') return true;
+  if(tab==='inicio' || tab==='notificacoes') return true;   // cada um vê só as notificações dos próprios eventos
   return Array.isArray(CURRENT_TELAS) && CURRENT_TELAS.includes(tab);
 }
 function somenteExecucao(){ return currentRoles.length===1 && currentRoles[0]==='execucao'; }
@@ -3293,6 +3318,8 @@ async function loadAll(){
   calcular();
   renderAprovacoes();
   renderAprovExtraList(); window.sirioEtapa&&sirioEtapa();
+  try{ atualizarSino(true); }catch(e){}
+  mesCarregarTodos().then(function(){ try{ renderMesCorrente(); }catch(e){} });   // meses com evento/ponto que a lista inicial não conhecia
   cargaFim();
   // Remove do planejamento o que na verdade é vaga extra: linha com nome de
   // pessoa e sem quantidade não é planejamento.
@@ -3380,6 +3407,7 @@ async function salvarChave(chave, texto, rotulo){
 }
 
 async function saveSolicitacoes(){
+  window.__solicSujo = false;
   return salvarChave('solicitacoes:log', JSON.stringify(SOLICITACOES), 'eventos');
 }
 async function saveCardapios(){
@@ -3539,10 +3567,15 @@ try{
     col.map(c=>c.ficha + ' <-> ' + c.insumo).join(' | '));
 }catch(e){}
 
-function renderFichaTable(){
-  document.getElementById('ficha-count').textContent = FICHA_TECNICA.length + ' produtos';
+/* O cruzamento fichas × insumos é caro (milhares de comparações com normalização de texto).
+   Fazia parte de cada tecla digitada na busca e travava a tela. Agora roda uma vez por carga
+   de dados, depois que a tabela já apareceu, e o resultado fica guardado. */
+let _colCache = null, _colChave = '', _colAgendado = null;
+function fichaAvisoColisao(){
+  const chave = FICHA_TECNICA.length + '|' + INSUMOS.length;
   try{
-    const col = fichasQueColidem();
+    if(!_colCache || _colChave !== chave){ _colCache = fichasQueColidem(); _colChave = chave; }
+    const col = _colCache;
     let av = document.getElementById('ficha-colisao');
     const pai = document.getElementById('ficha-count');
     if(!av && pai && pai.parentNode){
@@ -3563,18 +3596,40 @@ function renderFichaTable(){
         '<br><br>Renomear a ficha ou o insumo resolve. Enquanto convivem, confira o custo desses itens nos eventos.';
     }
   }catch(e){}
-  const q = (document.getElementById('ficha-search').value || '').trim().toLowerCase();
-  let filtered = FICHA_TECNICA;
-  if(q){
-    filtered = FICHA_TECNICA.filter(p => p.nome.toLowerCase().includes(q) || String(p.codigo).includes(q));
+}
+
+/* Índice de busca: nome sem acento/caixa + código, montado uma vez por carga de dados. */
+let _fichaBusca = null;
+function fichaIndiceBusca(){
+  if(!_fichaBusca || _fichaBusca.ref !== FICHA_TECNICA || _fichaBusca.n !== FICHA_TECNICA.length){
+    _fichaBusca = { ref:FICHA_TECNICA, n:FICHA_TECNICA.length,
+      v: FICHA_TECNICA.map(function(p,i){ return { i:i, t: normNome(p.nome) + ' ' + String(p.codigo||'') }; }) };
   }
+  return _fichaBusca.v;
+}
+
+function renderFichaTable(opts){
+  document.getElementById('ficha-count').textContent = FICHA_TECNICA.length + ' produtos';
+  if(!(opts && opts.soBusca)){   // abrir a aba ou recarregar dados: aviso em segundo plano; digitar na busca não recalcula
+    clearTimeout(_colAgendado); _colAgendado = setTimeout(fichaAvisoColisao, 80);
+  }
+  const q = (document.getElementById('ficha-search').value || '').trim().toLowerCase();
+  let filtradoIdx;
+  if(q){
+    const palavras = normNome(q).split(' ').filter(Boolean);
+    filtradoIdx = fichaIndiceBusca().filter(function(x){ return palavras.every(function(w){ return x.t.indexOf(w) >= 0; }); })
+                                    .map(function(x){ return x.i; });
+  } else {
+    filtradoIdx = FICHA_TECNICA.map(function(_,i){ return i; });
+  }
+  const filtered = filtradoIdx;
   const LIMIT = 150;
-  const shown = filtered.slice(0, LIMIT);
-  document.getElementById('ficha-table').innerHTML = shown.map((p)=>`
-    <tr class="menu-card" style="cursor:pointer;" data-ficha-idx="${FICHA_TECNICA.indexOf(p)}">
+  const shown = filtered.slice(0, LIMIT).map(function(i){ return { p:FICHA_TECNICA[i], i:i }; });
+  document.getElementById('ficha-table').innerHTML = shown.map((x)=>{ const p = x.p; return `
+    <tr class="menu-card" style="cursor:pointer;" data-ficha-idx="${x.i}">
     <td>${p.codigo||'—'}</td><td>${p.nome}</td><td>${p.pontoVenda}</td>
     <td style="text-align:right">${p.itens.length}</td>
-    <td style="text-align:right">${p.subtotal.toLocaleString('pt-BR',{minimumFractionDigits:2})}</td></tr>`).join('');
+    <td style="text-align:right">${p.subtotal.toLocaleString('pt-BR',{minimumFractionDigits:2})}</td></tr>`; }).join('');
   document.getElementById('ficha-more').textContent = filtered.length > LIMIT
     ? `Mostrando ${LIMIT} de ${filtered.length} resultados — refine a busca para ver outros.`
     : (q ? `${filtered.length} resultado(s) para "${q}".` : 'Clique num produto para ver a composição completa.');
@@ -3582,7 +3637,11 @@ function renderFichaTable(){
     tr.addEventListener('click', ()=> abrirDetalheFicha(parseInt(tr.dataset.fichaIdx)));
   });
 }
-document.getElementById('ficha-search').addEventListener('input', renderFichaTable);
+let _fichaDeb = null;   // espera o usuário parar de digitar um instante antes de filtrar
+document.getElementById('ficha-search').addEventListener('input', function(){
+  clearTimeout(_fichaDeb);
+  _fichaDeb = setTimeout(function(){ renderFichaTable({soBusca:true}); }, 180);
+});
 
 function abrirDetalheFicha(idx){
   const p = FICHA_TECNICA[idx];
@@ -5927,9 +5986,11 @@ document.getElementById('btn-enviar-solicitacao').addEventListener('click', asyn
   window.__SERV_APLICADOS = [];
   try{ renderServPrevia(); }catch(e){}
   await saveSolicitacoes();
-  showModal(comoOrcamento ? 'Orçamento salvo com sucesso' : 'Solicitação enviada com sucesso',
+  showModal(comoOrcamento ? 'Encaminhado para análise do orçamento' : 'Solicitação enviada com sucesso',
     comoOrcamento
-      ? `"${nome}" foi salvo como orçamento. Acompanhe na aba Orçamento.`
+      ? `O evento <strong>"${nome}"</strong> foi <strong>encaminhado para análise do orçamento</strong> pela equipe de A&amp;B.<br><br>` +
+        `Quando a nova versão do orçamento estiver pronta, você receberá uma notificação 🔔 na aba <strong>4. Notificações</strong> e um e-mail com os detalhes. ` +
+        `Você pode acompanhar a negociação na aba <strong>0. Orçamento</strong>.`
       : `"${nome}" foi enviada para aprovação. Primeiro aprovador: Aurélio Felix. Acompanhe o status na aba Relatório.`);
   renderAprovacoes(); renderAprovExtraList(); renderExecucao(); renderRelatorio(); renderOrcamento();
   }catch(e){
@@ -5940,6 +6001,203 @@ document.getElementById('btn-enviar-solicitacao').addEventListener('click', asyn
     __travarEnvio(false);
   }
 });
+
+/* ============ NOTIFICAÇÕES 🔔 ============
+   As notificações ficam dentro do próprio evento (s.notificacoes), gravadas junto com ele.
+   O que já foi lido fica guardado no navegador de cada usuário. */
+function notifEmailMeu(){ return String(currentUserEmail||'').trim().toLowerCase(); }
+function notifLidasGet(){
+  try{ return new Set(JSON.parse(localStorage.getItem('notif_lidas_'+notifEmailMeu())||'[]')); }
+  catch(e){ return new Set(window.__notifLidasMem||[]); }
+}
+function notifLidasSet(set){
+  const arr = [...set].slice(-500); window.__notifLidasMem = arr;
+  try{ localStorage.setItem('notif_lidas_'+notifEmailMeu(), JSON.stringify(arr)); }catch(e){}
+}
+/* Cria a notificação para o solicitante do evento. */
+function notificar(s, tipo, titulo, texto, extra){
+  const para = String(s.solicitante || s.criadoPor || '').trim().toLowerCase();
+  if(!para) return;
+  s.notificacoes = s.notificacoes || [];
+  s.notificacoes.push(Object.assign({ id: uid(), em: new Date().toISOString(), tipo, titulo, texto,
+    de: currentUserName || currentUserEmail || '', para }, extra || {}));
+  if(s.notificacoes.length > 60) s.notificacoes = s.notificacoes.slice(-60);
+}
+function notifMinhas(){
+  const me = notifEmailMeu(); if(!me) return [];
+  const out = [];
+  SOLICITACOES.forEach(s=>{ (s.notificacoes||[]).forEach(n=>{ if(String(n.para||'').toLowerCase() === me) out.push({n, s}); }); });
+  out.sort((a,b)=> a.n.em < b.n.em ? 1 : -1);
+  return out;
+}
+function atualizarSino(avisar){
+  const b = document.getElementById('notif-badge'); if(!b) return;
+  const lidas = notifLidasGet();
+  const nao = notifMinhas().filter(x=>!lidas.has(x.n.id)).length;
+  b.textContent = nao; b.style.display = nao ? '' : 'none';
+  if(avisar && nao) showToast('🔔 Você tem ' + nao + ' notificação(ões) nova(s) — veja a aba 4. Notificações');
+}
+async function recarregarSolicitacoes(){
+  if(window.__solicSujo || __enviandoSolicitacao) return false;   // há edição ainda não gravada: não sobrescreve
+  try{
+    const txt = await lerGrande('solicitacoes:log');
+    if(!txt) return false;
+    const srv = JSON.parse(txt);
+    if(!Array.isArray(srv)) return false;
+    SOLICITACOES = srv;
+    return true;
+  }catch(e){ console.warn('recarregar eventos:', e); return false; }
+}
+function notifMarcarLida(nid){
+  const l = notifLidasGet(); l.add(nid); notifLidasSet(l); atualizarSino(); renderNotificacoes();
+}
+function notifMarcarTodas(){
+  const l = notifLidasGet(); notifMinhas().forEach(x=>l.add(x.n.id)); notifLidasSet(l); atualizarSino(); renderNotificacoes();
+}
+function notifIrOrcamento(sid, nid){
+  if(nid){ const l = notifLidasGet(); l.add(nid); notifLidasSet(l); atualizarSino(); }
+  const b = document.querySelector('.tab-btn[data-tab="orcamento"]'); if(b) b.click();
+  setTimeout(function(){
+    const el = document.getElementById('orc-ev-'+sid);
+    if(el){ el.scrollIntoView({behavior:'smooth', block:'start'}); const ta = document.getElementById('orc-msg-'+sid); if(ta) ta.focus({preventScroll:true}); }
+  }, 450);
+}
+function notifAprovar(sid, nid){
+  const l = notifLidasGet(); l.add(nid); notifLidasSet(l); atualizarSino();
+  orcAceitar(sid);
+}
+function renderNotificacoes(){
+  const lista = document.getElementById('notif-lista'), vazio = document.getElementById('notif-vazio');
+  if(!lista) return;
+  const itens = notifMinhas(), lidas = notifLidasGet();
+  if(!itens.length){ lista.innerHTML = ''; if(vazio) vazio.style.display = 'block'; return; }
+  if(vazio) vazio.style.display = 'none';
+  const esc = x=>String(x==null?'':x).replace(/</g,'&lt;');
+  lista.innerHTML = itens.map(function(x){
+    const n = x.n, s = x.s, nova = !lidas.has(n.id);
+    const quando = new Date(n.em).toLocaleString('pt-BR');
+    let corpo = '<div style="font-size:.88rem;">' + esc(n.texto) + '</div>';
+    let botoes = '';
+    if(n.tipo === 'orcamento_versao'){
+      const hist = (s.orcamento && s.orcamento.historico) || [];
+      const ult = hist[hist.length-1];
+      const vigente = s.status === 'Aguardando solicitante' && ult && ult.versao === n.versao;
+      corpo += '<div class="notif-guia"><strong>Confira o seu e-mail:</strong> enviamos o detalhe da nova versão do orçamento.<br>' +
+        'Depois, escolha uma das opções:<ul>' +
+        '<li>Se estiver <strong>de acordo com o valor</strong>, clique em <strong>Aprovar evento</strong>.</li>' +
+        '<li>Se <strong>não concordar</strong> com a versão, entre em <strong>0. Orçamento</strong>, localize o seu evento, ' +
+        'escreva o seu ponto de vista no campo <strong>Conversa</strong> e clique em <strong>Enviar mensagem</strong>.</li></ul></div>';
+      botoes = vigente
+        ? '<button class="btn sm gold" onclick="notifAprovar(\'' + s.id + '\',\'' + n.id + '\')">Aprovar evento</button>'
+        : '<span class="badge">' + (s.orcamento && s.orcamento.aceite && s.orcamento.aceite.versao === n.versao ? 'Versão já aprovada' : 'Esta versão não está mais aguardando resposta') + '</span>';
+      botoes += '<button class="btn sm secondary" style="margin-left:.4rem;" onclick="notifIrOrcamento(\'' + s.id + '\',\'' + n.id + '\')">Ir para 0. Orçamento</button>';
+    } else if(n.tipo === 'mensagem'){
+      botoes = '<button class="btn sm secondary" onclick="notifIrOrcamento(\'' + s.id + '\',\'' + n.id + '\')">Abrir a conversa</button>';
+    }
+    if(nova) botoes += '<button class="btn sm secondary" style="margin-left:.4rem;" onclick="notifMarcarLida(\'' + n.id + '\')">Marcar como lida</button>';
+    return '<div class="notif-card' + (nova ? ' nova' : '') + '">' +
+      '<h4>🔔 ' + esc(n.titulo) + (nova ? ' <span class="badge amber">nova</span>' : '') + '</h4>' +
+      '<div class="subtle" style="font-size:.76rem;margin-bottom:.4rem;">' + quando + ' · ' + esc(s.nome||'') +
+        (n.de ? ' · de ' + esc(n.de) : '') + ' · ' + statusBadge(s.status) + '</div>' +
+      corpo + '<div style="margin-top:.5rem;">' + botoes + '</div></div>';
+  }).join('');
+}
+document.getElementById('notif-atualizar').addEventListener('click', async ()=>{
+  const ok = await recarregarSolicitacoes();
+  renderNotificacoes(); atualizarSino();
+  showToast(ok ? 'Notificações atualizadas' : 'Nada novo para carregar agora');
+});
+document.getElementById('notif-todas').addEventListener('click', notifMarcarTodas);
+
+/* ============ RELATÓRIO PDF — CONFERÊNCIA DE ESTOQUE ============
+   Mesmo layout do relatório de fechamento diário (cabeçalho, barra de impressão, rodapé,
+   A4 paisagem), com a tabela exatamente como está filtrada em tela. */
+function montarRelatorioConf(){
+  const esc = t=>String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const orig = document.getElementById('card-conf-estoque');
+  if(!orig) return '';
+  const val = id => { const e = document.getElementById(id); return e ? e : null; };
+  const selTxt = id => { const e = val(id); return e && e.selectedOptions && e.selectedOptions[0] ? e.selectedOptions[0].textContent : ''; };
+  // filtros em uso, lidos antes de remover os controles
+  const filtros = [];
+  filtros.push('Período: ' + (selTxt('conf-mes') || '—'));
+  filtros.push('Visão: ' + (selTxt('conf-modo') || '—'));
+  if(val('conf-modo') && val('conf-modo').value === 'pdv') filtros.push('Ponto de venda: ' + (selTxt('conf-pdv') || 'todos'));
+  filtros.push('Situação: ' + (selTxt('conf-status') || 'Todas'));
+  const busca = val('conf-busca') ? val('conf-busca').value.trim() : '';
+  if(busca) filtros.push('Busca: "' + busca + '"');
+  if(val('conf-tol')) filtros.push('Tolerância: ' + val('conf-tol').value + '%');
+  const nLinhas = (document.getElementById('conf-tbody')||{children:[]}).children.length;
+
+  const c = orig.cloneNode(true);
+  c.querySelectorAll('.subtle, details, #conf-previa').forEach(e=>e.remove());
+  c.querySelectorAll('button, input, select, textarea, label').forEach(e=>e.remove());
+  c.querySelectorAll('div[style*="display:flex"]').forEach(e=>{ if(!e.textContent.trim()) e.remove(); });
+  c.querySelectorAll('[style*="max-height"]').forEach(e=>{ e.style.maxHeight = 'none'; e.style.overflow = 'visible'; });
+  c.querySelectorAll('[id]').forEach(e=>e.removeAttribute('id'));
+  c.removeAttribute('id');
+
+  const css = [...document.querySelectorAll('style')].map(s=>s.textContent).join('\n');
+  const agora = new Date().toLocaleString('pt-BR');
+  const quem = (typeof currentUserName!=='undefined' && currentUserName) ? currentUserName : '';
+  const titulo = 'Conferência de estoque — vendas × requisições';
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+<title>${esc(titulo)}</title>
+<style>${css}</style>
+<style>
+  @page{ size:A4 landscape; margin:10mm; }
+  *{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  html,body{ background:#fff !important; }
+  body{ padding:0 0 1rem; }
+  .rel-wrap{ max-width:1180px; margin:0 auto; padding:0 1rem; }
+  .rel-cab{ border-bottom:3px solid #1B2A5B; padding:.6rem 0 .5rem; margin-bottom:1rem;
+            display:flex; justify-content:space-between; align-items:flex-end; gap:1rem; }
+  .rel-cab h1{ font-family:Georgia,serif; color:#1B2A5B; font-size:1.35rem; margin:0; }
+  .rel-cab .sub{ font-family:Arial,Helvetica,sans-serif; color:#5B6373; font-size:.78rem; }
+  .rel-filtros{ font-family:Arial,Helvetica,sans-serif; font-size:.78rem; background:#EEF3FC; border:1px solid #D8E1F5;
+                border-radius:6px; padding:.45rem .7rem; margin:0 0 .8rem; color:#1B2A5B; }
+  .rel-mes .card{ box-shadow:none !important; border:1px solid #D8E1F5; margin:0 0 1rem; }
+  .rel-mes table{ font-size:.72rem; width:100%; }
+  .rel-mes tr{ break-inside:avoid; page-break-inside:avoid; }
+  .rel-mes thead{ display:table-header-group; }
+  .rel-mes td:first-child{ white-space:normal; }
+  .rel-rodape{ font-family:Arial,Helvetica,sans-serif; font-size:.7rem; color:#8A93A8;
+               border-top:1px solid #D8E1F5; padding-top:.4rem; margin-top:.6rem; }
+  .rel-barra{ position:sticky; top:0; z-index:10; background:#FFF8E1; border-bottom:1px solid #E4D3A0;
+              font-family:Arial,Helvetica,sans-serif; font-size:.85rem; padding:.6rem 1rem;
+              display:flex; justify-content:space-between; align-items:center; gap:1rem; }
+  .rel-barra button{ background:#C9A227; color:#1B2A5B; border:0; border-radius:6px; padding:.5rem 1rem;
+                     font-weight:bold; cursor:pointer; font-size:.85rem; }
+  @media print{ .rel-barra{ display:none !important; } }
+</style></head><body>
+<div class="rel-barra"><span>Pronto para imprimir. Na tela de impressão, escolha <strong>Salvar como PDF</strong> e mantenha <strong>Gráficos de fundo</strong> marcado para as cores saírem.</span>
+<button onclick="window.print()">Imprimir / salvar PDF</button></div>
+<div class="rel-wrap">
+<div class="rel-cab"><div><h1>${esc(titulo)}</h1>
+<div class="sub">Clube Sírio — Alimentos e Bebidas · Inventário inicial + requisições − vendas = estoque esperado</div></div>
+<div class="sub">Gerado em ${esc(agora)}${quem?' por '+esc(quem):''}</div></div>
+<div class="rel-filtros"><strong>Filtros aplicados:</strong> ${esc(filtros.join(' · '))} · <strong>${nLinhas}</strong> linha(s) no relatório</div>
+<section class="rel-mes">${c.outerHTML}</section>
+<div class="rel-rodape">Workflow de Eventos A&amp;B · ${typeof VERSAO_FERRAMENTA!=='undefined'?esc(VERSAO_FERRAMENTA):''} · valores do momento da geração, com os filtros que estavam em tela.</div>
+</div></body></html>`;
+}
+function exportarConfPDF(){
+  try{ renderConfEstoque(); }catch(e){}                     // garante a tela atualizada com os filtros atuais
+  const tb = document.getElementById('conf-tbody');
+  if(!tb || !tb.children.length){ showToast('Não há linhas na tela para o relatório'); return; }
+  const html = montarRelatorioConf();
+  let win = null;
+  try{ win = window.open('', '_blank'); }catch(e){ win = null; }
+  if(win && win.document){
+    win.document.open(); win.document.write(html); win.document.close();
+    setTimeout(()=>{ try{ win.focus(); win.print(); }catch(e){} }, 600);
+    showToast('Relatório aberto em nova janela');
+  } else {
+    baixarArquivo('conferencia_estoque.html', html, 'text/html');
+    showToast('Janela bloqueada pelo navegador — relatório baixado como arquivo');
+  }
+}
+document.getElementById('conf-pdf').addEventListener('click', exportarConfPDF);
 
 /* ---------- APROVACOES ---------- */
 function statusBadge(status){
@@ -6035,6 +6293,11 @@ async function decidir(id, acao){
     s.aprovacao2 = decisao;
     s.status = acao==='aprovar' ? 'Aprovado' : 'Rejeitado';
   }
+  notificar(s, 'decisao',
+    acao==='aprovar' ? (s.status==='Aprovado' ? 'Evento aprovado' : 'Evento aprovado na 1ª alçada') : 'Evento rejeitado',
+    '"' + (s.nome||'') + '" — ' + (acao==='aprovar'
+      ? (s.status==='Aprovado' ? 'aprovação final concluída.' : 'aguarda agora a aprovação final.')
+      : 'foi rejeitado por ' + (currentUserName||'aprovador') + '.') + (comentario ? ' Comentário: ' + comentario : ''));
   await saveSolicitacoes();
   if(acao==='aprovar'){
     const proximo = hasRole('aprovador1') ? 'Aguarda agora o 2º aprovador (Liliam Lanterme).' : 'Aprovação concluída — a solicitação virou orçamento previsto do evento.';
@@ -6877,8 +7140,15 @@ async function orcEnviar(sid){
   s.orcamento.historico = (s.orcamento.historico||[]).concat([v]);
   if(String(obs).trim()) orcMensagem(s, obs);
   s.status = 'Aguardando solicitante';
+  notificar(s, 'orcamento_versao', 'Nova versão do orçamento — ' + (s.nome||'evento'),
+    'A equipe de A&B enviou a versão ' + v.versao + ' do orçamento de "' + (s.nome||'') + '" (' + (fmtDataBR(s.data)||'sem data') +
+    '), no total de ' + fmtBRL(v.total) + '.', { versao: v.versao, total: v.total });
   await saveSolicitacoes(); renderOrcamento(); renderInicio();
   showToast('Versão ' + v.versao + ' enviada — ' + fmtBRL(v.total));
+  showModal('Versão ' + v.versao + ' enviada ao solicitante',
+    'O solicitante já recebeu a notificação 🔔 na aba <strong>4. Notificações</strong>.<br><br>' +
+    'Falta enviar o <strong>e-mail com o detalhe da versão</strong>, que é o que a notificação orienta ele a conferir:<br><br>' +
+    '<button class="btn gold" onclick="fecharModal();orcEnviarEmail(\'' + s.id + '\')">Abrir e-mail para o solicitante</button>');
 }
 
 async function orcPedirAjuste(sid){
@@ -6936,6 +7206,9 @@ async function orcComentar(sid){
   const txt = el ? el.value : '';
   if(!String(txt).trim()){ showToast('Escreva a mensagem'); return; }
   orcMensagem(s, txt);
+  if(String(s.solicitante || s.criadoPor || '').trim().toLowerCase() !== notifEmailMeu())
+    notificar(s, 'mensagem', 'Nova mensagem sobre ' + (s.nome||'seu evento'),
+      (currentUserName||'A equipe') + ' escreveu na conversa do orçamento: "' + String(txt).trim().slice(0,160) + (String(txt).trim().length>160?'…':'') + '"');
   await saveSolicitacoes(); renderOrcamento();
 }
 
@@ -7002,6 +7275,7 @@ function orcLigarBusca(sid){
 }
 
 function orcAdicionarItem(sid){
+  window.__solicSujo = true;
   const s = SOLICITACOES.find(x=>x.id===sid); if(!s) return;
   const inp = document.getElementById('orc-add-'+sid);
   const qin = document.getElementById('orc-addq-'+sid);
@@ -7023,6 +7297,7 @@ function orcAdicionarItem(sid){
 }
 
 function orcRemoverItem(sid, idx){
+  window.__solicSujo = true;
   const s = SOLICITACOES.find(x=>x.id===sid); if(!s) return;
   const p = (s.produtosEvento||[])[idx]; if(!p) return;
   s.produtosEvento.splice(idx,1);
@@ -7031,6 +7306,7 @@ function orcRemoverItem(sid, idx){
 }
 
 function orcAlterarQtd(sid, tipo, idx, valor){
+  window.__solicSujo = true;
   const s = SOLICITACOES.find(x=>x.id===sid); if(!s) return;
   const v = Math.max(0, parseFloat(valor)||0);
   if(tipo==='mo'){
@@ -7140,7 +7416,7 @@ function renderOrcamento(){
       '<div style="align-self:end;"><button class="btn sm secondary" onclick="orcCopiarEmail(\'' + s.id + '\')">Copiar texto</button></div>' +
       '</div><div class="hint" style="text-transform:none;font-weight:normal;">Abre o seu programa de e-mail com a mensagem pronta. ' +
       'Para enviar o orçamento formatado, use <strong>Imprimir orçamento</strong>, salve em PDF e anexe.</div></div>' + botoes;
-    return '<div class="evento-item"><div class="evento-cab" style="cursor:default;">' +
+    return '<div class="evento-item" id="orc-ev-' + s.id + '"><div class="evento-cab" style="cursor:default;">' +
       '<span class="evento-nome">' + (s.nome||'(sem nome)') + '</span>' +
       '<span class="evento-quando">' + (fmtDataBR(s.data)||'sem data') + ' · ' + (s.convidados||0) + ' convidados · ' + (s.departamento||'') +
         (s.solicitanteNome || s.solicitante || s.criadoPor ? ' · aberto por ' + (s.solicitanteNome || s.solicitante || s.criadoPor) : '') + '</span>' +
@@ -7172,6 +7448,7 @@ function renderOrcamento(){
       botoes + '</div></div>';
   }).join('');
   evs.forEach(s=>{ try{ orcLigarBusca(s.id); }catch(e){} });
+  try{ atualizarSino(); renderNotificacoes(); }catch(e){}
 }
 
 /* Envio por e-mail. A página é estática, então não há como disparar o e-mail
@@ -7925,14 +8202,39 @@ async function mesSalvar(ym){
   const ok = await salvarChave('indicadores:'+ym, JSON.stringify(MES_DADOS[ym]||{}), 'indicadores de '+mesRotulo(ym));
   return ok;
 }
+/* Meses cujos dados salvos já foram lidos do servidor nesta sessão. */
+const MES_CARREGADOS = {};
 async function mesCarregar(ym){
   try{
     const t = await lerGrande('indicadores:'+ym);
     if(t){ const d = JSON.parse(t); if(d && typeof d==='object') MES_DADOS[ym] = d; }
-  }catch(e){}
+    MES_CARREGADOS[ym] = true;
+    return true;
+  }catch(e){ console.warn('indicadores de '+ym+' não lidos:', e); return false; }
+}
+/* Antes de gravar um upload, garante que o que já estava salvo foi lido. Sem isso, o upload
+   gravava só o que estava na memória e podia apagar folha, CMV, receita ou despesas do mesmo mês. */
+async function mesGarantirCarregado(ym){
+  if(MES_CARREGADOS[ym]) return true;
+  return await mesCarregar(ym);
+}
+/* Meses a carregar: do primeiro quadro automático até o mês seguinte ao atual, mais os que têm
+   evento ou ponto. A lista de meses com ponto sozinha não serve: quando o carregamento roda em
+   paralelo com o de eventos e ponto, ela ainda está vazia e os dados salvos nunca voltavam. */
+function mesMesesParaCarregar(){
+  const set = new Set(mesComPonto());
+  const hoje = new Date();
+  let a = +MES_PRIMEIRA.slice(0,4), m = +MES_PRIMEIRA.slice(5,7);
+  const fimA = hoje.getFullYear(), fimM = hoje.getMonth() + 2;   // mês seguinte ao atual
+  const limite = fimA*12 + (fimM-1);
+  while(a*12 + (m-1) <= limite){
+    set.add(a + '-' + String(m).padStart(2,'0'));
+    m++; if(m>12){ m=1; a++; }
+  }
+  return [...set];
 }
 async function mesCarregarTodos(){
-  for(const ym of mesComPonto()){ await mesCarregar(ym); }
+  await Promise.all(mesMesesParaCarregar().map(ym=>mesCarregar(ym)));
 }
 
 function mesMontarQuadro(ym){
@@ -8125,6 +8427,7 @@ function mesDiaFinalDoNome(nome){
 
 async function mesAnexarReceita(arquivo){
   const ym = mesSelecionado();
+  if(!(await mesGarantirCarregado(ym))){ mesStat('Não consegui ler os dados já salvos de '+mesRotulo(ym)+'. Tente de novo, para não sobrescrever o que já está lá.', true); return; }
   try{
     const r = await setImportarReceita(arquivo);
     const nDias = mesDias(ym);
@@ -8143,6 +8446,7 @@ async function mesAnexarReceita(arquivo){
 
 async function mesAnexarCMV(arquivo){
   const ym = mesSelecionado();
+  if(!(await mesGarantirCarregado(ym))){ mesStat('Não consegui ler os dados já salvos de '+mesRotulo(ym)+'. Tente de novo, para não sobrescrever o que já está lá.', true); return; }
   try{
     const r = await setImportarCMV(arquivo);
     const ate = mesDiaFinalDoNome(arquivo.name) || 0;
@@ -8177,6 +8481,7 @@ async function mesAnexarGerais(arquivo){
       if(!tem) throw new Error('as datas do arquivo são de '+mesRotulo(doArq)+', que não está na lista de competências deste quadro.');
       sel.value = doArq; ym = doArq; trocou = true;
     }
+    if(!(await mesGarantirCarregado(ym))) throw new Error('não consegui ler os dados já salvos de '+mesRotulo(ym)+'; tente de novo para não sobrescrevê-los');
     const sep = (linhas.slice(0,5).join('').split(';').length > linhas.slice(0,5).join('').split('\t').length) ? ';' : '\t';
     const porDia = {}; let n = 0, foraMes = 0; const usadas = new Set(); let formato = 'razao';
     const nz = s => normNome(s).replace(/ /g,'');
@@ -8242,6 +8547,7 @@ async function mesAnexarGerais(arquivo){
 
 async function mesAplicarFolha(){
   const ym = mesSelecionado();
+  if(!(await mesGarantirCarregado(ym))){ mesStat('Não consegui ler os dados já salvos de '+mesRotulo(ym)+'. Tente de novo, para não sobrescrever o que já está lá.', true); return; }
   const v = parseFloat(String((document.getElementById('mes-folha')||{}).value).replace(',','.'));
   if(isNaN(v) || v < 0){ mesStat('<strong style="color:var(--red)">Valor de folha inválido.</strong>', true); return; }
   MES_DADOS[ym] = Object.assign({}, MES_DADOS[ym], {folha:v,
@@ -8257,7 +8563,11 @@ function initMesCorrente(){
     const e = document.getElementById(id);
     if(e && !e.dataset.ligado){ e.addEventListener(ev, fn); e.dataset.ligado='1'; }
   };
-  liga('mes-comp','change', ()=>{ renderMesCorrente(); mesStat(''); });
+  liga('mes-comp','change', async ()=>{
+    const ym = mesSelecionado();
+    if(ym && !MES_CARREGADOS[ym]) await mesCarregar(ym);   // dados salvos do mês escolhido
+    renderMesCorrente(); mesStat('');
+  });
   liga('mes-up-receita','change', function(){ if(this.files[0]) mesAnexarReceita(this.files[0]); this.value=''; });
   liga('mes-up-cmv','change', function(){ if(this.files[0]) mesAnexarCMV(this.files[0]); this.value=''; });
   liga('mes-up-gerais','change', function(){ if(this.files[0]) mesAnexarGerais(this.files[0]); this.value=''; });
@@ -8298,8 +8608,11 @@ function renderExecucao(){
   const chaves = Object.keys(grupos).sort();
 
   const cardHTML = (s)=>{
-    const real = s.realizado || {mo:{}, insumos:[]};
-    const moRows = s.previsto.rows.filter(r=>r.qty>0 || (real.mo && real.mo[r.f]));
+    /* Antes do primeiro "Salvar realizado", a tela já vem com tudo o que foi escolhido na etapa
+       Solicitar (mão de obra, insumos e produtos). Depois de salvo, vale o que foi salvo —
+       inclusive as exclusões feitas. */
+    const real = execPreCarga(s);
+    const moLista = execMoLista(s, real);
     return `
     <div class="req-card">
       <div class="req-card-head">
@@ -8312,14 +8625,18 @@ function renderExecucao(){
       ${hasRole('admin')
         ? `<button class="btn sm secondary" onclick="apagarEventoAprovado('${s.id}')" style="margin-left:.4rem;color:var(--red);">Apagar definitivamente</button>` : ''}
       <h3>Mão de obra — realizado</h3>
-      <table><thead><tr><th>Função</th><th style="text-align:right">Previsto</th><th style="text-align:right">Realizado</th></tr></thead>
-      <tbody>${moRows.map(r=>`<tr><td>${r.f}</td><td style="text-align:right">${r.qty}</td>
-        <td style="text-align:right"><input type="number" min="0" style="width:5rem;text-align:right" class="real-mo" data-id="${s.id}" data-f="${r.f}" value="${real.mo && real.mo[r.f]!=null ? real.mo[r.f] : r.qty}" oninput="renderContaEvento('${s.id}')"></td></tr>`).join('')}</tbody></table>
+      <table><thead><tr><th>Função</th><th style="text-align:right">Previsto</th><th style="text-align:right">Realizado</th><th></th></tr></thead>
+      <tbody id="mo-rows-${s.id}">${moLista.map(x=>moRowHtml(s.id, x.f, x.prev, x.real)).join('')}</tbody></table>
+      <div class="row3" style="margin:.4rem 0 .8rem;align-items:end;">
+        <div><select id="mo-add-f-${s.id}">${execMoOpcoes(s).map(f=>`<option value="${f}">${f}</option>`).join('')}</select></div>
+        <div><input type="number" id="mo-add-q-${s.id}" min="0" step="1" placeholder="Quantidade"></div>
+        <div><button class="btn sm secondary" onclick="addMoRow('${s.id}')">+ Adicionar função</button></div>
+      </div>
 
       <h3>Insumos — realizado</h3>
       <div id="ins-rows-${s.id}">${(real.insumos||[]).map((row,idx)=>insumoRowHtml(s.id,idx,row)).join('')}</div>
       <button class="btn sm secondary" onclick="addInsumoRow('${s.id}')">+ Adicionar item</button>
-      ${s.previsto.itens && s.previsto.itens.length>0 && (!real.insumos || real.insumos.length===0) ? `<button class="btn sm gold" onclick="prefillInsumos('${s.id}')">Pré-preencher com receita prevista (${s.previsto.itens.length} itens)</button>` : ''}
+      ${s.previsto.itens && s.previsto.itens.length>0 && (!real.insumos || real.insumos.length===0) && !real.salvo ? `<button class="btn sm gold" onclick="prefillInsumos('${s.id}')">Pré-preencher com receita prevista (${s.previsto.itens.length} itens)</button>` : ''}
 
       <h3>Produto — realizado <span class="hint" style="text-transform:none;">(custo pela Ficha Técnica; produtos de evento interno usam a tabela de valores)</span></h3>
       <div id="prod-rows-${s.id}">${(real.produtos||[]).map((row,idx)=>produtoRowHtml(s.id,idx,row)).join('')}</div>
@@ -8618,6 +8935,61 @@ function ensureInsumoDatalist(){
   dl.innerHTML = INSUMOS.map(i=>`<option value="${i.nome}">`).join('');
   insumoDatalistBuilt = true;
 }
+/* Pré-carga da etapa Executar: o que foi escolhido em Solicitar vira o ponto de partida do realizado. */
+function execPreCarga(s){
+  if(s.realizado) return { mo: s.realizado.mo||{}, insumos: s.realizado.insumos||[], produtos: s.realizado.produtos||[], salvo:true };
+  const insumos = [], produtos = [];
+  const soma = (arr, nome, q)=>{
+    const x = arr.find(r=>r.item===nome);
+    if(x) x.qtd = Math.round((x.qtd + q)*100)/100; else arr.push({ item:nome, qtd:Math.round(q*100)/100 });
+  };
+  const pe = (s.produtosEvento||[]).filter(p=>p && p.nome && (parseFloat(p.qtd)||0) > 0);
+  if(pe.length){
+    pe.forEach(p=>soma(p.ehInsumo ? insumos : produtos, p.nome, parseFloat(p.qtd)||0));
+  } else if(s.previsto && Array.isArray(s.previsto.produtos) && s.previsto.produtos.length){
+    s.previsto.produtos.forEach(p=>{ if(p && p.nome && (p.qtd||0)>0) soma(produtos, p.nome, p.qtd); });
+  } else if(s.previsto && Array.isArray(s.previsto.itens)){
+    s.previsto.itens.forEach(it=>soma(insumos, it.nome, (it.qtdPorPessoa||0) * (s.convidados||0)));
+  }
+  return { mo:null, insumos, produtos, salvo:false };
+}
+/* Funções de mão de obra exibidas: as previstas (ou, depois de salvo, as que ficaram no realizado). */
+function execMoLista(s, real){
+  const rows = (s.previsto && s.previsto.rows) || [];
+  const prevDe = f => { const r = rows.find(x=>x.f===f); return r ? (r.qty||0) : 0; };
+  if(real.salvo){
+    return Object.keys(real.mo||{}).map(f=>({ f, prev:prevDe(f), real:real.mo[f] }));
+  }
+  return rows.filter(r=>r.qty>0).map(r=>({ f:r.f, prev:r.qty, real:r.qty }));
+}
+function execMoOpcoes(s){
+  const todas = {};
+  ((s.previsto && s.previsto.rows)||[]).forEach(r=>{ todas[r.f] = 1; });
+  Object.keys((PARAMS && PARAMS.custo8h) || {}).forEach(f=>{ todas[f] = 1; });
+  return Object.keys(todas).sort((a,b)=>a.localeCompare(b,'pt-BR'));
+}
+function moRowHtml(sid, f, prev, valor){
+  return `<tr data-mo-f="${f}"><td>${f}</td><td style="text-align:right">${prev}</td>
+    <td style="text-align:right"><input type="number" min="0" style="width:5rem;text-align:right" class="real-mo" data-id="${sid}" data-f="${f}" value="${valor}" oninput="renderContaEvento('${sid}')"></td>
+    <td style="text-align:center"><button class="del-btn" onclick="this.closest('tr').remove(); renderContaEvento('${sid}')">remover</button></td></tr>`;
+}
+function addMoRow(sid){
+  const s = SOLICITACOES.find(x=>x.id===sid); if(!s) return;
+  const sel = document.getElementById('mo-add-f-'+sid), q = document.getElementById('mo-add-q-'+sid);
+  const f = sel ? sel.value : ''; const qtd = parseFloat(q && q.value) || 0;
+  if(!f){ showToast('Escolha a função'); return; }
+  if(qtd <= 0){ showToast('Informe a quantidade'); return; }
+  const corpo = document.getElementById('mo-rows-'+sid);
+  const ja = [...corpo.querySelectorAll('tr[data-mo-f]')].find(tr=>tr.dataset.moF === f);
+  if(ja){ const inp = ja.querySelector('.real-mo'); inp.value = (parseFloat(inp.value)||0) + qtd; showToast('Quantidade somada à função existente'); }
+  else{
+    const rows = (s.previsto && s.previsto.rows) || []; const r = rows.find(x=>x.f===f);
+    corpo.insertAdjacentHTML('beforeend', moRowHtml(sid, f, r ? (r.qty||0) : 0, qtd));
+  }
+  if(q) q.value = '';
+  renderContaEvento(sid);
+}
+
 function insumoRowHtml(sid, idx, row){
   row = row || {item:'', qtd:0};
   ensureInsumoDatalist();
@@ -10361,6 +10733,7 @@ function abrirAba(btn){
     if(btn.dataset.tab==='relatorio') renderRelatorio();
     if(btn.dataset.tab==='indicadores'){ try{ initIndicadores(); }catch(e){} }
     if(btn.dataset.tab==='orcamento'){ try{ orcEnsureDatalist(); renderOrcamento(); }catch(e){} }
+    if(btn.dataset.tab==='notificacoes'){ renderNotificacoes(); recarregarSolicitacoes().then(function(ok){ if(ok){ renderNotificacoes(); atualizarSino(); } }); }
     if(btn.dataset.tab==='desperdicio'){ try{ initDesperdicio(); }catch(e){} }
     if(btn.dataset.tab==='maodeobra'){
       try{ popularSelectsPlanejamento(); popularSelectsPonto(); }catch(e){}
