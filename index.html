@@ -1100,6 +1100,15 @@ teresa cristina - teresa.cristina@sirio.org.br"></textarea>
           </div>
 
           <div class="row2">
+            <div><label>Recorrência</label>
+              <select id="in-recorrencia">
+                <option value="">Não recorrente</option>
+                <option value="semanal">Recorrente — toda semana, no mesmo dia da semana</option>
+              </select></div>
+            <div class="hint" style="text-transform:none;font-weight:normal;align-self:end;">Evento recorrente: depois da aprovação deste primeiro evento, o sistema cria as demais datas automaticamente pelos próximos 12 meses, exceto feriados. Só o administrador cancela uma data ou encerra a série.</div>
+          </div>
+
+          <div class="row2">
             <div><label>Horário início</label><input type="time" id="in-hora-ini" value="19:00"></div>
             <div><label>Horário fim</label><input type="time" id="in-hora-fim" value="23:00"></div>
           </div>
@@ -1493,6 +1502,7 @@ teresa cristina - teresa.cristina@sirio.org.br"></textarea>
 
     <!-- ============ TAB: RELATORIO ============ -->
     <div class="panel" id="panel-relatorio">
+      <div class="card" id="rec-card" style="display:none;"></div>
       <p class="subtle">Comparativo previsto x realizado dos dois grandes custos do evento: mão de obra cooperada e produtos. Use esta conta para cobrar do contratante o excedente, quando o realizado superar o solicitado na aba Nova Solicitação.</p>
       <div class="card">
         <h2>Quadro sintético — previsto x realizado</h2>
@@ -3043,7 +3053,20 @@ function setoresDoUsuario(){
   return SETORES_EVENTO.filter(se => hasRole(SETOR_ROLE[se]));
 }
 function restritoPorSetor(){ return setoresDoUsuario().length > 0; }
+/* Perfil só de solicitante: vê apenas os eventos abertos com o próprio e-mail. Quem tem perfil de
+   A&B ou de gestão (administrador, visão completa, precificação, aprovação, execução, acompanhamento)
+   continua vendo tudo. Evento antigo, sem autor registrado, não aparece para o solicitante. */
+const PERFIS_VISAO_AMPLA = ['admin','visao_total','precificar','aprovador1','aprovador2','execucao','acompanhamento'];
+function soVejoMeusEventos(){
+  if(PERFIS_VISAO_AMPLA.some(r=>hasRole(r))) return false;
+  return hasRole('solicitante') || hasRole('orcamento');
+}
+function eventoEhMeu(s){
+  const dono = String((s && (s.solicitante || s.criadoPor)) || '').trim().toLowerCase();
+  return !!dono && dono === String(currentUserEmail||'').trim().toLowerCase();
+}
 function podeVerEvento(s){
+  if(soVejoMeusEventos()) return eventoEhMeu(s);
   const lim = setoresDoUsuario();
   if(!lim.length) return true;
   // Evento que a própria pessoa abriu nunca desaparece para ela, mesmo que o
@@ -3174,7 +3197,7 @@ async function loadAll(){
     _passo(loadChunkedByMonth('mo:planejamento:')),
     _leg('mo:registros'), _leg('mo:autorizacoes_extras'), _leg('mo:planejamento'),
     _passo(loadReqExtras()), _passo(loadDesperdicio()),
-    _passo(loadCooperadosExtras()), _passo(carregarIndicadoresSet()), _passo(mesCarregarTodos())
+    _passo(loadCooperadosExtras()), _passo(carregarIndicadoresSet()), _passo(mesCarregarTodos()), _passo(recCarregarConfig())
   ]);
 
   try{ if(tPar) PARAMS = JSON.parse(tPar); }catch(e){}
@@ -3319,6 +3342,7 @@ async function loadAll(){
   renderAprovacoes();
   renderAprovExtraList(); window.sirioEtapa&&sirioEtapa();
   try{ atualizarSino(true); }catch(e){}
+  try{ if(hasRole('admin')) recGerar(); }catch(e){}   // admin que abre o sistema mantém as séries em dia
   mesCarregarTodos().then(function(){ try{ renderMesCorrente(); }catch(e){} });   // meses com evento/ponto que a lista inicial não conhecia
   cargaFim();
   // Remove do planejamento o que na verdade é vaga extra: linha com nome de
@@ -5977,9 +6001,13 @@ document.getElementById('btn-enviar-solicitacao').addEventListener('click', asyn
     // "Salvar como orçamento" cria o evento um passo antes da aprovação
     status: comoOrcamento ? 'Em orçamento' : 'Pendente Aprovador 1',
     aprovacao1: null, aprovacao2: null,
-    realizado: null
+    realizado: null,
+    // série recorrente: este é o evento de origem; as demais datas nascem depois da aprovação dele
+    recorrencia: ((document.getElementById('in-recorrencia')||{}).value === 'semanal' && document.getElementById('in-data').value)
+      ? { tipo:'semanal', inicio: document.getElementById('in-data').value, fim:null, canceladas:[] } : null
   };
   SOLICITACOES.push(record);
+  { const rc = document.getElementById('in-recorrencia'); if(rc) rc.value = ''; }
   // limpa o nome já: qualquer clique que escape da trava cai em "Informe o nome do evento"
   document.getElementById('in-nome').value='';
   const obsEl = document.getElementById('in-observacao'); if(obsEl) obsEl.value='';
@@ -6001,6 +6029,202 @@ document.getElementById('btn-enviar-solicitacao').addEventListener('click', asyn
     __travarEnvio(false);
   }
 });
+
+/* ============ EVENTOS RECORRENTES ============
+   O evento marcado como recorrente é a ORIGEM da série. Depois que ele é aprovado, o sistema cria uma
+   cópia aprovada para cada semana, no mesmo dia da semana, pelos próximos 12 meses. Feriados não geram
+   data. Rodar de novo nunca duplica: cada data é conferida antes de criar. Só administrador cancela
+   uma data ou encerra a série. */
+const REC_MESES_A_FRENTE = 12;
+const REC_STATUS_ORIGEM_OK = ['Aprovado','Em Execução','Concluído'];
+let REC_CONFIG = { feriadosExtras:[], feriadosIgnorar:[] };
+const REC_DIAS = ['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'];
+
+function recIso(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function recDate(iso){ const p = iso.split('-').map(Number); return new Date(p[0], p[1]-1, p[2], 12, 0, 0); }   // meio-dia: evita virada por fuso
+function recSomaDias(iso, n){ const d = recDate(iso); d.setDate(d.getDate()+n); return recIso(d); }
+function recPascoa(ano){
+  const a=ano%19, b=Math.floor(ano/100), c=ano%100, d=Math.floor(b/4), e=b%4, f=Math.floor((b+8)/25),
+        g=Math.floor((b-f+1)/3), h=(19*a+b-d-g+15)%30, i=Math.floor(c/4), k=c%4,
+        l=(32+2*e+2*i-h-k)%7, m=Math.floor((a+11*h+22*l)/451),
+        mes=Math.floor((h+l-7*m+114)/31), dia=((h+l-7*m+114)%31)+1;
+  return ano+'-'+String(mes).padStart(2,'0')+'-'+String(dia).padStart(2,'0');
+}
+const _recFerCache = {};
+/* Feriados nacionais e de São Paulo (capital e estado). Carnaval e Corpus Christi são ponto facultativo,
+   mas entram porque o clube costuma não operar; o administrador pode tirá-los em "Ignorar". */
+function recFeriadosBase(ano){
+  if(_recFerCache[ano]) return _recFerCache[ano];
+  const f = {};
+  [['01-01','Confraternização Universal'],['01-25','Aniversário de São Paulo'],['04-21','Tiradentes'],['05-01','Dia do Trabalho'],
+   ['07-09','Revolução Constitucionalista'],['09-07','Independência'],['10-12','Nossa Senhora Aparecida'],['11-02','Finados'],
+   ['11-15','Proclamação da República'],['11-20','Consciência Negra'],['12-25','Natal']].forEach(x=>{ f[ano+'-'+x[0]] = x[1]; });
+  const pas = recPascoa(ano);
+  f[recSomaDias(pas,-48)] = 'Segunda de Carnaval'; f[recSomaDias(pas,-47)] = 'Terça de Carnaval';
+  f[recSomaDias(pas,-2)] = 'Sexta-feira Santa'; f[recSomaDias(pas,60)] = 'Corpus Christi';
+  _recFerCache[ano] = f; return f;
+}
+function recFeriadoNome(iso){
+  if((REC_CONFIG.feriadosIgnorar||[]).indexOf(iso) >= 0) return '';
+  const base = recFeriadosBase(+iso.slice(0,4))[iso];
+  if(base) return base;
+  return (REC_CONFIG.feriadosExtras||[]).indexOf(iso) >= 0 ? 'Data sem evento (cadastrada)' : '';
+}
+async function recCarregarConfig(){
+  try{
+    const tx = await lerGrande('recorrencia:config');
+    if(tx){ const c = JSON.parse(tx); REC_CONFIG = { feriadosExtras:c.feriadosExtras||[], feriadosIgnorar:c.feriadosIgnorar||[] }; }
+  }catch(e){}
+}
+function recLimite(){ const d = new Date(); d.setHours(12,0,0,0); d.setMonth(d.getMonth()+REC_MESES_A_FRENTE); return recIso(d); }
+function recMatrizes(){ return SOLICITACOES.filter(s=>s.recorrencia && !s.serieId); }
+
+function recCopiar(m, data){
+  const c = JSON.parse(JSON.stringify(m));
+  c.id = uid(); c.data = data;
+  c.criadoEm = new Date().toLocaleString('pt-BR');
+  c.status = 'Aprovado';                    // a série foi aprovada uma vez só, na origem
+  c.realizado = null;                       // execução e ponto são de cada data
+  delete c.notificacoes; delete c.orcamento; delete c.cancelamento;
+  c.recorrencia = null; c.serieId = m.id; c.geradoAutomatico = true;
+  return c;
+}
+async function recGerar(){
+  if(window.__recGerando || window.__solicSujo || __enviandoSolicitacao) return null;
+  window.__recGerando = true;
+  try{
+    const lim = recLimite(); let novas = 0, feriados = 0;
+    recMatrizes().forEach(m=>{
+      if(REC_STATUS_ORIGEM_OK.indexOf(m.status) < 0) return;   // só depois da aprovação do evento de origem
+      const r = m.recorrencia; if(!r || !m.data) return;
+      const canc = new Set(r.canceladas||[]);
+      const jaTem = new Set(SOLICITACOES.filter(x=>x.serieId===m.id).map(x=>x.data));
+      for(let d = recSomaDias(m.data,7); d <= lim; d = recSomaDias(d,7)){
+        if(r.fim && d >= r.fim) break;
+        if(canc.has(d) || jaTem.has(d)) continue;
+        if(recFeriadoNome(d)){ feriados++; continue; }
+        SOLICITACOES.push(recCopiar(m, d)); novas++;
+      }
+    });
+    if(novas){
+      await saveSolicitacoes();
+      try{ renderRelatorio(); renderExecucao(); renderAprovacoes(); renderInicio(); }catch(e){}
+    }
+    return { novas, feriados };
+  }catch(e){ console.error('gerar recorrentes:', e); return null; }
+  finally{ window.__recGerando = false; }
+}
+function recSoAdmin(){ if(!hasRole('admin')){ showToast('Somente o administrador pode fazer isso'); return false; } return true; }
+async function recCancelarData(mid, iso){
+  if(!recSoAdmin()) return;
+  const m = SOLICITACOES.find(x=>x.id===mid); if(!m || !m.recorrencia) return;
+  if(!iso){ showToast('Escolha a data'); return; }
+  if(iso === m.data){ showToast('Esta é a data do evento de origem; para parar a série use "Encerrar série"'); return; }
+  const motivo = window.prompt('Motivo do cancelamento de ' + fmtDataBR(iso) + ' (opcional):', '') ;
+  if(motivo === null) return;
+  const r = m.recorrencia; r.canceladas = r.canceladas || [];
+  if(r.canceladas.indexOf(iso) < 0) r.canceladas.push(iso);
+  const occ = SOLICITACOES.find(x=>x.serieId===mid && x.data===iso);
+  if(occ){
+    if(occ.status === 'Em Execução' || occ.status === 'Concluído'){ showToast('Esta data já está em execução ou concluída'); return; }
+    occ.status = 'Cancelado';
+    occ.cancelamento = { por: currentUserName||currentUserEmail||'', em: new Date().toISOString(), motivo: motivo, pontual:true };
+  }
+  await saveSolicitacoes(); renderRelatorio();
+  showToast('Data ' + fmtDataBR(iso) + ' cancelada; as demais seguem normalmente');
+}
+async function recEncerrar(mid){
+  if(!recSoAdmin()) return;
+  const m = SOLICITACOES.find(x=>x.id===mid); if(!m || !m.recorrencia) return;
+  const el = document.getElementById('rec-fim-'+mid);
+  const fim = el && el.value; if(!fim){ showToast('Escolha a data a partir da qual a série termina'); return; }
+  if(fim <= m.data){ showToast('A data de término precisa ser depois do evento de origem'); return; }
+  if(!window.confirm('Encerrar a série "' + m.nome + '" a partir de ' + fmtDataBR(fim) + '? As datas desse dia em diante serão canceladas.')) return;
+  m.recorrencia.fim = fim;
+  SOLICITACOES.filter(x=>x.serieId===mid && x.data>=fim && x.status==='Aprovado').forEach(x=>{
+    x.status = 'Cancelado';
+    x.cancelamento = { por: currentUserName||currentUserEmail||'', em: new Date().toISOString(), motivo:'Série encerrada', serie:true };
+  });
+  await saveSolicitacoes(); renderRelatorio();
+  showToast('Série encerrada a partir de ' + fmtDataBR(fim));
+}
+async function recRetomar(mid){
+  if(!recSoAdmin()) return;
+  const m = SOLICITACOES.find(x=>x.id===mid); if(!m || !m.recorrencia) return;
+  m.recorrencia.fim = null;
+  SOLICITACOES.filter(x=>x.serieId===mid && x.status==='Cancelado' && x.cancelamento && x.cancelamento.serie).forEach(x=>{
+    x.status = 'Aprovado'; delete x.cancelamento;
+  });
+  await saveSolicitacoes();
+  await recGerar();
+  renderRelatorio(); showToast('Série retomada');
+}
+async function recGerarAgora(){
+  if(!recSoAdmin()) return;
+  const r = await recGerar();
+  renderRelatorio();
+  showToast(r ? (r.novas ? r.novas + ' data(s) criada(s)' : 'Nada novo a criar: as séries já estão em dia') : 'Não foi possível gerar agora; tente de novo');
+}
+async function recSalvarFeriados(){
+  if(!recSoAdmin()) return;
+  const ler = id => String((document.getElementById(id)||{}).value||'').split(/[\s,;]+/).map(x=>x.trim()).filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x));
+  REC_CONFIG = { feriadosExtras: ler('rec-extras'), feriadosIgnorar: ler('rec-ignorar') };
+  await salvarChave('recorrencia:config', JSON.stringify(REC_CONFIG), 'feriados da recorrência');
+  renderRelatorio(); showToast('Datas salvas. Valem para as próximas gerações.');
+}
+function renderRecorrentes(){
+  const card = document.getElementById('rec-card'); if(!card) return;
+  const adm = hasRole('admin');
+  const ms = recMatrizes().filter(podeVerEvento);
+  if(!ms.length && !adm){ card.style.display = 'none'; return; }
+  card.style.display = '';
+  const hoje = recIso(new Date());
+  const esc = x=>String(x==null?'':x).replace(/</g,'&lt;');
+  const blocos = ms.map(function(m){
+    const r = m.recorrencia, dow = REC_DIAS[recDate(m.data).getDay()];
+    const oc = SOLICITACOES.filter(x=>x.serieId===m.id).sort((a,b)=>a.data<b.data?-1:1);
+    const ativas = oc.filter(x=>x.status!=='Cancelado').length, canc = oc.filter(x=>x.status==='Cancelado').length;
+    const prox = oc.filter(x=>x.data>=hoje).slice(0,8);
+    const origemOk = REC_STATUS_ORIGEM_OK.indexOf(m.status) >= 0;
+    let h = '<div class="notif-card"><h4>🔁 ' + esc(m.nome) + '</h4>' +
+      '<div class="subtle" style="font-size:.82rem;">Toda ' + dow + ' · origem em ' + fmtDataBR(m.data) + ' · ' + statusBadge(m.status) +
+      (r.fim ? ' · <strong>encerrada a partir de ' + fmtDataBR(r.fim) + '</strong>' : '') + '</div>';
+    if(!origemOk) h += '<div class="note" style="margin-top:.4rem;">As demais datas serão criadas automaticamente quando o evento de origem for aprovado.</div>';
+    else h += '<div style="font-size:.85rem;margin:.4rem 0;">' + ativas + ' data(s) ativa(s)' + (canc ? ' · ' + canc + ' cancelada(s)' : '') + '. Feriados não geram data.</div>';
+    if(prox.length){
+      h += '<table style="font-size:.82rem;"><thead><tr><th>Próximas datas</th><th>Status</th>' + (adm ? '<th></th>' : '') + '</tr></thead><tbody>' +
+        prox.map(x=>'<tr><td>' + fmtDataBR(x.data) + ' — ' + REC_DIAS[recDate(x.data).getDay()] + '</td><td>' + statusBadge(x.status) +
+          (x.cancelamento && x.cancelamento.motivo ? ' <span class="subtle">(' + esc(x.cancelamento.motivo) + ')</span>' : '') + '</td>' +
+          (adm ? '<td style="text-align:right">' + (x.status==='Aprovado' ? '<button class="btn sm secondary" onclick="recCancelarData(\'' + m.id + '\',\'' + x.data + '\')">Cancelar esta data</button>' : '') + '</td>' : '') + '</tr>').join('') +
+        '</tbody></table>';
+    }
+    if(adm && origemOk){
+      h += '<div class="row3" style="margin-top:.6rem;align-items:end;">' +
+        '<div><label>Cancelar outra data</label><input type="date" id="rec-canc-' + m.id + '"></div>' +
+        '<div><button class="btn sm secondary" onclick="recCancelarData(\'' + m.id + '\', document.getElementById(\'rec-canc-' + m.id + '\').value)">Cancelar esta data</button></div><div></div></div>';
+      h += r.fim
+        ? '<div style="margin-top:.5rem;"><button class="btn sm gold" onclick="recRetomar(\'' + m.id + '\')">Retomar série</button></div>'
+        : '<div class="row3" style="margin-top:.5rem;align-items:end;"><div><label>Encerrar série a partir de</label><input type="date" id="rec-fim-' + m.id + '"></div>' +
+          '<div><button class="btn sm secondary" onclick="recEncerrar(\'' + m.id + '\')">Encerrar série</button></div><div></div></div>';
+    }
+    return h + '</div>';
+  }).join('');
+  let adminHtml = '';
+  if(adm){
+    const lim = recLimite(), lista = [];
+    for(let a = new Date().getFullYear(); a <= +lim.slice(0,4); a++)
+      Object.keys(recFeriadosBase(a)).sort().forEach(d=>{ if(d>=hoje && d<=lim && !(REC_CONFIG.feriadosIgnorar||[]).includes(d)) lista.push(fmtDataBR(d) + ' ' + recFeriadosBase(a)[d]); });
+    adminHtml = '<details style="margin-top:.8rem;"><summary style="cursor:pointer;font-weight:bold;">Feriados considerados (não geram data) e ajustes</summary>' +
+      '<div style="font-size:.8rem;margin:.5rem 0;">' + (lista.join(' · ') || 'nenhum no período') + '</div>' +
+      '<div class="row2"><div><label>Datas sem evento a mais (AAAA-MM-DD, uma por linha)</label><textarea id="rec-extras" style="min-height:60px;">' + (REC_CONFIG.feriadosExtras||[]).join('\n') + '</textarea></div>' +
+      '<div><label>Feriados a ignorar, que devem gerar data (AAAA-MM-DD)</label><textarea id="rec-ignorar" style="min-height:60px;">' + (REC_CONFIG.feriadosIgnorar||[]).join('\n') + '</textarea></div></div>' +
+      '<button class="btn sm secondary" onclick="recSalvarFeriados()">Salvar datas</button></details>' +
+      '<div style="margin-top:.6rem;"><button class="btn sm gold" onclick="recGerarAgora()">Gerar datas agora</button></div>';
+  }
+  card.innerHTML = '<h2>🔁 Eventos recorrentes</h2>' +
+    '<p class="subtle">Série semanal: depois que o evento de origem é aprovado, as demais datas são criadas já aprovadas, pelos próximos ' + REC_MESES_A_FRENTE + ' meses, exceto feriados. Cancelar uma data ou encerrar a série é função do administrador.</p>' +
+    (blocos || '<div class="empty" style="display:block;">Nenhuma série recorrente ainda. Marque "Recorrente" ao solicitar um evento.</div>') + adminHtml;
+}
 
 /* ============ NOTIFICAÇÕES 🔔 ============
    As notificações ficam dentro do próprio evento (s.notificacoes), gravadas junto com ele.
@@ -6309,6 +6533,7 @@ async function decidir(id, acao){
       ? (s.status==='Aprovado' ? 'aprovação final concluída.' : 'aguarda agora a aprovação final.')
       : 'foi rejeitado por ' + (currentUserName||'aprovador') + '.') + (comentario ? ' Comentário: ' + comentario : ''));
   await saveSolicitacoes();
+  try{ recGerar(); }catch(e){}     // se este era o evento de origem de uma série, cria as demais datas
   if(acao==='aprovar'){
     const proximo = hasRole('aprovador1') ? 'Aguarda agora o 2º aprovador (Liliam Lanterme).' : 'Aprovação concluída — a solicitação virou orçamento previsto do evento.';
     showModal('Solicitação aprovada', `"${s.nome}" foi aprovada por ${currentUserName}. ${proximo}`);
@@ -7089,6 +7314,15 @@ const podePrecificar = () => hasRole('precificar')||hasRole('aprovador1')||hasRo
    (abertos antes desta versão), vale para o lado solicitante da mesa: quem tem
    o perfil Orçamento e não precifica. O filtro de setor já limita quais
    eventos essa pessoa alcança. */
+/* Aprova o orçamento (ou pede ajuste) o solicitante do evento e o administrador. Quem só precifica,
+   do lado de A&B, não aprova. Evento sem autor registrado: vale o perfil Orçamento que não precifica. */
+function podeAceitarOrcamento(s){
+  if(hasRole('admin')) return true;
+  if(eventoEhMeu(s)) return true;
+  const dono = String((s && (s.solicitante || s.criadoPor)) || '').trim();
+  if(!dono) return hasRole('orcamento') && !podePrecificar();
+  return false;
+}
 const souSolicitante = s => hasRole('admin') ||
   ((s.solicitante||s.criadoPor||'') === (currentUserEmail||'')) ||
   (hasRole('orcamento') && !podePrecificar());
@@ -7097,7 +7331,11 @@ const souSolicitante = s => hasRole('admin') ||
    da aprovação ficam registrados). Quando o botão não aparece, o cartão diz por quê. Em vez de simplesmente não existir,
    o cartão diz o que falta — foi isso que custou uma manhã de conferência. */
 function orcPorQueNaoAceita(s){
-  if(s.status === 'Aguardando solicitante') return '';
+  if(s.status === 'Aguardando solicitante'){
+    if(podeAceitarOrcamento(s)) return '';
+    return 'Quem aprova esta versão é o solicitante do evento (' + String(s.solicitanteNome || s.solicitante || s.criadoPor || '—').replace(/</g,'&lt;') +
+           '). Você acompanha e conversa por aqui; a aprovação fica registrada com o nome dele.';
+  }
   if(podePrecificar())
     return 'O botão <strong>Aprovar orçamento</strong> aparece depois que você clicar em <strong>Enviar orçamento ao solicitante</strong>.';
   return 'A equipe de A&amp;B ainda não enviou esta versão. O botão <strong>Aprovar orçamento</strong> aparece quando o orçamento for enviado.';
@@ -7163,6 +7401,7 @@ async function orcEnviar(sid){
 
 async function orcPedirAjuste(sid){
   const s = SOLICITACOES.find(x=>x.id===sid); if(!s) return;
+  if(!podeAceitarOrcamento(s)){ showToast('Somente o solicitante do evento pede ajuste ou aprova'); return; }
   const msg = prompt('Pedir ajuste em ' + s.nome + '.\n\nDescreva o que precisa mudar:');
   if(msg === null) return;
   if(!String(msg).trim()){ showToast('Descreva o ajuste'); return; }
@@ -7174,6 +7413,8 @@ async function orcPedirAjuste(sid){
 
 async function orcAceitar(sid){
   const s = SOLICITACOES.find(x=>x.id===sid); if(!s) return;
+  if(!podeAceitarOrcamento(s)){ showToast('Somente o solicitante do evento aprova o orçamento'); return; }
+  if(s.status !== 'Aguardando solicitante'){ showToast('Esta versão não está mais aguardando aprovação. Atualize a tela.'); return; }
   const hist = (s.orcamento && s.orcamento.historico) || [];
   const ult = hist[hist.length-1];
   if(!ult){ showToast('Não há versão enviada para aprovar'); return; }
@@ -7185,20 +7426,33 @@ async function orcAceitar(sid){
     'o evento segue direto para a aprovação final.<br><br>' +
     '<button class="btn gold" id="btn-conf-aceite">Aprovar esta versão</button>', false);
   setTimeout(function(){
-    const b=document.getElementById('btn-conf-aceite'); if(!b) return;
+    const b = document.getElementById('btn-conf-aceite'); if(!b) return;
     b.addEventListener('click', async function(){
+      if(b.disabled) return;                           // um clique só: evita aprovar duas vezes
+      b.disabled = true; b.textContent = 'Registrando a aprovação…';
+      // guarda o estado anterior: se o servidor não confirmar, volta tudo como estava
+      const antes = { status:s.status, aceite:s.orcamento.aceite, aprovacao1:s.aprovacao1 };
       s.orcamento.aceite = { por: currentUserName||currentUserEmail||'', em: new Date().toISOString(),
                              versao: ult.versao, total: ult.total };
       s.aprovacao1 = { aprovador: (currentUserName||'') + ' (aceite do orçamento)',
                        data: new Date().toLocaleString('pt-BR'), decisao: 'aprovar',
                        comentario: 'Aceitou a versão ' + ult.versao + ' do orçamento, ' + fmtBRL(ult.total) };
       s.status = 'Pendente Aprovador 2';
-      await saveSolicitacoes();
-      // O modal é exibido por classe; escrever display direto no elemento
-      // tinha prioridade sobre ela e deixava o modal invisível na vez seguinte.
-      fecharModal();
+      let ok = false;
+      try{ ok = await saveSolicitacoes(); }catch(e){ ok = false; }
+      if(!ok){
+        s.status = antes.status; s.orcamento.aceite = antes.aceite; s.aprovacao1 = antes.aprovacao1;
+        showModal('A aprovação NÃO foi registrada',
+          'O servidor não confirmou a gravação, então o orçamento de <strong>' + s.nome + '</strong> continua <strong>aguardando a sua aprovação</strong>. ' +
+          'Verifique a conexão e clique em <strong>Aprovar orçamento</strong> de novo.', true);
+        renderOrcamento();
+        return;
+      }
       renderOrcamento(); renderAprovacoes(); renderInicio();
-      showToast('Orçamento aprovado — segue para aprovação final');
+      showModal('Orçamento aprovado ✓',
+        '<strong>' + s.nome + '</strong> — versão ' + ult.versao + ', ' + fmtBRL(ult.total) + '.<br><br>' +
+        'A aprovação foi registrada com o seu nome e a hora. O evento saiu da lista de orçamentos e <strong>seguiu para a aprovação final</strong>. ' +
+        'Você acompanha o andamento na aba <strong>Relatório</strong>.', false);
     });
   }, 60);
 }
@@ -7412,7 +7666,7 @@ function renderOrcamento(){
       botoes += '<button class="btn sm gold" onclick="orcEnviar(\'' + s.id + '\')" style="margin-left:.4rem;">Enviar orçamento ao solicitante</button>';
     if(podePrecificar() && s.status==='Aguardando solicitante')
       botoes += '<button class="btn sm secondary" onclick="orcReabrir(\'' + s.id + '\')" style="margin-left:.4rem;">Reabrir para ajuste</button>';
-    if(s.status==='Aguardando solicitante')
+    if(s.status==='Aguardando solicitante' && podeAceitarOrcamento(s))
       botoes += '<button class="btn sm gold" onclick="orcAceitar(\'' + s.id + '\')" style="margin-left:.4rem;">Aprovar orçamento</button>' +
                 '<button class="btn sm secondary" onclick="orcPedirAjuste(\'' + s.id + '\')" style="margin-left:.4rem;">Pedir ajuste</button>';
     const porque = orcPorQueNaoAceita(s);
@@ -8170,7 +8424,7 @@ function eventoTotalPrevisto(s){
   return ((s.previsto && s.previsto.custoMO) || 0) + custoPrevistoProdutos(s);
 }
 function eventoContaNoPrevisto(s){
-  return s.status !== 'Rejeitado';   // só os rejeitados ficam fora; Em orçamento e demais status entram
+  return s.status !== 'Rejeitado' && s.status !== 'Cancelado';   // rejeitados e cancelados (inclui datas canceladas de série recorrente) ficam fora
 }
 /* "Soma total previsto do mês": é o valor que o Relatório mostra no rodapé e que o
    Resultado diário do mês corrente usa como eventos a cobrar. */
@@ -9578,6 +9832,7 @@ function initRelatorioOperacional(){
 }
 
 function renderRelatorio(){ return _comMemoProdutos(function(){
+  try{ renderRecorrentes(); }catch(e){ console.warn('recorrentes:', e); }
   const body = document.getElementById('rel-body');
   const empty = document.getElementById('rel-empty');
   relFiltroSetorOpcoes();
@@ -9626,7 +9881,7 @@ function renderRelatorio(){ return _comMemoProdutos(function(){
     const totalRealizado = (real.mo!=null && real.produtos!=null) ? real.mo + real.produtos : null;
     const excedente = totalRealizado!=null ? totalRealizado - totalPrevisto : null;
     const corExc = excedente>0.005 ? 'var(--red)' : (excedente<-0.005 ? 'var(--green)' : 'inherit');
-    return `<tr><td>${s.nome}</td><td>${fmtDataBR(s.data)||'—'}</td><td>${setorDoEvento(s)||'—'}</td><td>${statusBadge(s.status)}</td><td>${rateioResumo(s)}</td>
+    return `<tr><td>${s.nome}${(s.recorrencia||s.serieId)?' <span title="Evento recorrente">🔁</span>':''}</td><td>${fmtDataBR(s.data)||'—'}</td><td>${setorDoEvento(s)||'—'}</td><td>${statusBadge(s.status)}</td><td>${rateioResumo(s)}</td>
       <td style="text-align:right">${fmtBRL(s.previsto.custoMO)}</td>
       <td style="text-align:right">${real.mo!=null?fmtBRL(real.mo):'—'}</td>
       <td style="text-align:right;color:${deltaMO>0?'var(--red)':'var(--green)'}">${deltaMO!=null?(deltaMO>0?'+':'')+fmtBRL(deltaMO).replace('R$ ',''):'—'}</td>
@@ -10742,7 +10997,11 @@ function abrirAba(btn){
     if(btn.dataset.tab==='execucao') renderExecucao();
     if(btn.dataset.tab==='relatorio') renderRelatorio();
     if(btn.dataset.tab==='indicadores'){ try{ initIndicadores(); }catch(e){} }
-    if(btn.dataset.tab==='orcamento'){ try{ orcEnsureDatalist(); renderOrcamento(); }catch(e){} }
+    if(btn.dataset.tab==='orcamento'){
+      try{ orcEnsureDatalist(); renderOrcamento(); }catch(e){}
+      // os eventos só eram lidos no login: a versão enviada por A&B depois disso não aparecia para o solicitante
+      recarregarSolicitacoes().then(function(ok){ if(ok){ try{ renderOrcamento(); }catch(e){} } });
+    }
     if(btn.dataset.tab==='notificacoes'){ renderNotificacoes(); recarregarSolicitacoes().then(function(ok){ if(ok){ renderNotificacoes(); atualizarSino(); } }); }
     if(btn.dataset.tab==='desperdicio'){ try{ initDesperdicio(); }catch(e){} }
     if(btn.dataset.tab==='maodeobra'){
