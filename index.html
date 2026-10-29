@@ -1526,6 +1526,13 @@ teresa cristina - teresa.cristina@sirio.org.br"></textarea>
     <!-- ============ TAB: RELATORIO ============ -->
     <div class="panel" id="panel-relatorio">
       <div class="card" id="rec-card" style="display:none;"></div>
+      <div class="card" id="prest-card">
+        <h2>🧾 Prestação de contas — eventos concluídos</h2>
+        <p class="subtle">Continuação do orçamento aprovado: o que foi orçado, o que foi realizado, o que foi devolvido ou acrescentado na execução (mão de obra, insumos e produtos) e o acerto final com o solicitante.</p>
+        <div class="row3" style="align-items:end;"><div><label>Buscar evento concluído</label><input type="text" id="prest-busca" placeholder="Nome, solicitante ou departamento..."></div><div></div><div></div></div>
+        <div id="prest-lista" style="margin-top:.6rem;"></div>
+        <div style="text-align:center;margin-top:.6rem;display:none;" id="prest-mais"><button class="btn secondary sm" id="prest-mais-btn">Mostrar mais</button></div>
+      </div>
       <p class="subtle">Comparativo previsto x realizado dos dois grandes custos do evento: mão de obra cooperada e produtos. Use esta conta para cobrar do contratante o excedente, quando o realizado superar o solicitado na aba Nova Solicitação.</p>
       <div class="card">
         <h2>Quadro sintético — previsto x realizado</h2>
@@ -3290,7 +3297,7 @@ async function loadAll(){
   })();
   insumoDatalistBuilt = false;
   try{
-    if(tSol){ const p = JSON.parse(tSol); if(Array.isArray(p)) SOLICITACOES = p; }
+    if(tSol){ const p = JSON.parse(tSol); if(Array.isArray(p)){ SOLICITACOES = p; SOLIC_BASE = solicSnapshot(p); } }
   }catch(e){}
   try{
     if(tLim){
@@ -3453,9 +3460,60 @@ async function salvarChave(chave, texto, rotulo){
   return ok;
 }
 
-async function saveSolicitacoes(){
+/* A lista de eventos é uma chave só no servidor. Antes, cada gravação mandava a lista inteira que estava
+   na memória de quem salvava; quem estava com a página aberta há tempo apagava os eventos novos dos
+   outros e revertia status (um evento aprovado voltava para orçamento). Agora, ao gravar, o sistema lê
+   a versão atual do servidor e aplica só o que ESTE usuário mudou, evento por evento. */
+let SOLIC_BASE = new Map();                       // id -> JSON da última versão conhecida do servidor
+function solicSnapshot(lista){
+  const m = new Map();
+  (lista || SOLICITACOES).forEach(function(e){ if(e && e.id) m.set(e.id, JSON.stringify(e)); });
+  return m;
+}
+let _solicFila = Promise.resolve();
+function saveSolicitacoes(){
   window.__solicSujo = false;
-  return salvarChave('solicitacoes:log', JSON.stringify(SOLICITACOES), 'eventos');
+  _solicFila = _solicFila.then(_saveSolicitacoesJuntando, _saveSolicitacoesJuntando);   // uma gravação por vez
+  return _solicFila;
+}
+async function _saveSolicitacoesJuntando(){
+  let remoto = null, leu = false;
+  try{
+    const txt = await lerGrande('solicitacoes:log');
+    if(txt){ const r = JSON.parse(txt); if(Array.isArray(r)){ remoto = r; leu = true; } }
+    else leu = !!(txt === null && SOLIC_BASE.size === 0);      // chave inexistente só é normal na primeira gravação
+  }catch(e){ leu = false; }
+  if(!leu){
+    // não deu para conferir o que está no servidor: gravar às cegas poderia apagar o trabalho de outras pessoas
+    try{ showModal('Não foi possível salvar',
+      'Não consegui conferir a versão atual dos eventos no servidor, e por segurança <strong>não gravei</strong>, para não apagar o trabalho de outras pessoas. ' +
+      'Verifique a conexão e tente de novo. Nada foi perdido: o que você fez continua nesta tela.', true); }catch(e){}
+    return false;
+  }
+  remoto = remoto || [];
+  const base = SOLIC_BASE;
+  const local = SOLICITACOES.filter(function(e){ return e && e.id; });
+  const localPorId = new Map(local.map(function(e){ return [e.id, e]; }));
+  const resultado = [], usados = new Set();
+  remoto.forEach(function(r){
+    if(!r || !r.id) return;
+    const l = localPorId.get(r.id);
+    if(!l){ if(!base.has(r.id)) resultado.push(r); return; }      // existia na base e sumiu daqui: excluído por este usuário
+    usados.add(r.id);
+    resultado.push(base.get(r.id) === JSON.stringify(l) ? r : l);  // mudou aqui: vale o daqui; senão vale o do servidor
+  });
+  const chaves = new Set();
+  resultado.forEach(function(x){ if(x.serieId) chaves.add(x.serieId + '|' + x.data); });
+  local.forEach(function(l){
+    if(usados.has(l.id)) return;
+    if(base.has(l.id) && base.get(l.id) === JSON.stringify(l)) return;          // outro usuário excluiu e eu não mexi
+    if(l.serieId){ const k = l.serieId + '|' + l.data; if(chaves.has(k)) return; chaves.add(k); }   // ocorrência de série já criada por outro
+    resultado.push(l);
+  });
+  SOLICITACOES = resultado;
+  const ok = await salvarChave('solicitacoes:log', JSON.stringify(resultado), 'eventos');
+  if(ok) SOLIC_BASE = solicSnapshot(resultado);
+  return ok;
 }
 async function saveCardapios(){
   await gravarGrande('cardapios:catalogo', JSON.stringify(CARDAPIOS));
@@ -4647,7 +4705,7 @@ document.getElementById('btn-limpar-eventos').addEventListener('click', async ()
     const extras = REQ_EXTRAS.filter(r=>ids.includes(r.eventoId)).length;
     SOLICITACOES = SOLICITACOES.filter(s=>!ids.includes(s.id));
     REQ_EXTRAS = REQ_EXTRAS.filter(r=>!ids.includes(r.eventoId));
-    const ok1 = await gravarVerificado('solicitacoes:log', JSON.stringify(SOLICITACOES));
+    const ok1 = await saveSolicitacoes();     // com junção: a exclusão vale, sem apagar eventos novos de outros usuários
     const ok2 = await gravarVerificado('eventos:req_extras', JSON.stringify(REQ_EXTRAS));
     renderAprovacoes(); renderExecucao(); renderRelatorio(); renderReqExtras(); renderInicio();
     el.innerHTML = (ok1 && ok2)
@@ -6036,7 +6094,15 @@ document.getElementById('btn-enviar-solicitacao').addEventListener('click', asyn
   const obsEl = document.getElementById('in-observacao'); if(obsEl) obsEl.value='';
   window.__SERV_APLICADOS = [];
   try{ renderServPrevia(); }catch(e){}
-  await saveSolicitacoes();
+  const gravou = await saveSolicitacoes();
+  if(!gravou){
+    // não confirmou no servidor: volta atrás para a pessoa tentar de novo sem duplicar
+    SOLICITACOES = SOLICITACOES.filter(function(x){ return x.id !== record.id; });
+    document.getElementById('in-nome').value = nome;
+    const ob = document.getElementById('in-observacao'); if(ob) ob.value = record.observacao || '';
+    showModal('O evento NÃO foi registrado', 'O servidor não confirmou a gravação de <strong>' + nome + '</strong>. Os dados continuam na tela: clique em <strong>Salvar como orçamento</strong> de novo. Se o problema continuar, verifique a conexão.', true);
+    return;
+  }
   showModal(comoOrcamento ? 'Encaminhado para análise do orçamento' : 'Solicitação enviada com sucesso',
     comoOrcamento
       ? `O evento <strong>"${nome}"</strong> foi <strong>encaminhado para análise do orçamento</strong> pela equipe de A&amp;B.<br><br>` +
@@ -6182,6 +6248,17 @@ async function recRetomar(mid){
   await recGerar();
   renderRelatorio(); showToast('Série retomada');
 }
+async function recRegularizarOrigem(mid){
+  if(!recSoAdmin()) return;
+  const m = SOLICITACOES.find(x=>x.id===mid); if(!m) return;
+  if(!window.confirm('Marcar "' + m.nome + '" como Aprovado? Use somente se a série já está aprovada e o status da origem foi revertido por engano.')) return;
+  m.status = 'Aprovado';
+  m.aprovacao2 = { aprovador: (currentUserName||'') + ' (regularização pelo administrador)', data: new Date().toLocaleString('pt-BR'), decisao:'aprovar',
+                   comentario:'Status da origem da série restabelecido: já havia datas aprovadas.' };
+  const ok = await saveSolicitacoes();
+  renderRelatorio(); try{ renderOrcamento(); renderExecucao(); }catch(e){}
+  showToast(ok ? 'Origem da série regularizada' : 'Não foi possível gravar; tente de novo');
+}
 async function recGerarAgora(){
   if(!recSoAdmin()) return;
   const r = await recGerar();
@@ -6212,7 +6289,13 @@ function renderRecorrentes(){
     let h = '<div class="notif-card"><h4>🔁 ' + esc(m.nome) + '</h4>' +
       '<div class="subtle" style="font-size:.82rem;">Toda ' + dow + ' · origem em ' + fmtDataBR(m.data) + ' · ' + statusBadge(m.status) +
       (r.fim ? ' · <strong>encerrada a partir de ' + fmtDataBR(r.fim) + '</strong>' : '') + '</div>';
-    if(!origemOk) h += '<div class="note" style="margin-top:.4rem;">As demais datas serão criadas automaticamente quando o evento de origem for aprovado.</div>';
+    const aprovadasFilhas = oc.filter(x=>REC_STATUS_ORIGEM_OK.indexOf(x.status)>=0).length;
+    if(!origemOk && aprovadasFilhas > 0){
+      h += '<div class="note" style="margin-top:.4rem;background:#FBEEEE;border-color:#B23A3A;"><strong>Atenção:</strong> o evento de origem está em "' + esc(m.status) + '", mas há ' + aprovadasFilhas +
+        ' data(s) desta série já aprovada(s). Isso indica que o status da origem foi revertido.' +
+        (adm ? '<br><button class="btn sm gold" style="margin-top:.4rem;" onclick="recRegularizarOrigem(\'' + m.id + '\')">Regularizar: marcar a origem como Aprovada</button>' : ' Peça ao administrador para regularizar.') + '</div>';
+    }
+    else if(!origemOk) h += '<div class="note" style="margin-top:.4rem;">As demais datas serão criadas automaticamente quando o evento de origem for aprovado.</div>';
     else h += '<div style="font-size:.85rem;margin:.4rem 0;">' + ativas + ' data(s) ativa(s)' + (canc ? ' · ' + canc + ' cancelada(s)' : '') + '. Feriados não geram data.</div>';
     if(prox.length){
       h += '<table style="font-size:.82rem;"><thead><tr><th>Próximas datas</th><th>Status</th>' + (adm ? '<th></th>' : '') + '</tr></thead><tbody>' +
@@ -6291,10 +6374,23 @@ async function recarregarSolicitacoes(){
     if(!txt) return false;
     const srv = JSON.parse(txt);
     if(!Array.isArray(srv)) return false;
-    SOLICITACOES = srv;
+    SOLICITACOES = srv; SOLIC_BASE = solicSnapshot(srv); window.__ultimaCargaSolic = Date.now();
     return true;
   }catch(e){ console.warn('recarregar eventos:', e); return false; }
 }
+/* Quem deixa a página aberta e volta depois vê o que mudou: recarrega os eventos (se não há edição em
+   andamento) e redesenha só a aba que está aberta. */
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState !== 'visible') return;
+  if(Date.now() - (window.__ultimaCargaSolic || 0) < 60000) return;
+  const ativo = document.querySelector('.tab-btn.active'); const aba = ativo ? ativo.dataset.tab : '';
+  if(aba === 'solicitar') return;                          // não mexe enquanto alguém preenche uma solicitação
+  recarregarSolicitacoes().then(function(ok){
+    if(!ok) return;
+    const mapa = { orcamento:renderOrcamento, execucao:renderExecucao, relatorio:renderRelatorio, notificacoes:renderNotificacoes, aprovacoes:renderAprovacoes, inicio:renderInicio };
+    try{ if(mapa[aba]) mapa[aba](); atualizarSino(); }catch(e){}
+  });
+});
 function notifMarcarLida(nid){
   const l = notifLidasGet(); l.add(nid); notifLidasSet(l); atualizarSino(); renderNotificacoes();
 }
@@ -9218,6 +9314,255 @@ function exportarRelatorioDia(){
 }
 document.getElementById('exec-rel-btn').addEventListener('click', exportarRelatorioDia);
 
+/* ============ PRESTAÇÃO DE CONTAS (eventos concluídos) ============
+   Continua o documento de orçamento: compara a versão APROVADA (itens e preços congelados) com o que
+   foi realizado na aba Executar, destacando o que foi devolvido ou acrescentado. Os itens do orçamento
+   usam o preço do próprio orçamento, para o acerto não variar por mudança de custo depois da aprovação;
+   itens acrescentados na execução usam o custo vigente. */
+function prestacaoDados(s){
+  const serie = s.serieId ? SOLICITACOES.find(x=>x.id===s.serieId) : null;
+  const orcFonte = s.orcamento || (serie && serie.orcamento) || null;     // data de série recorrente: vale o orçamento da série
+  const hist = (orcFonte && orcFonte.historico) || [];
+  const ac = orcFonte && orcFonte.aceite;
+  let v = (ac && hist.find(x=>x.versao===ac.versao)) || hist[hist.length-1] || null;
+  const doOrcamento = !!v;
+  if(!v){
+    const rows = ((s.previsto && s.previsto.rows)||[]).filter(r=>r.qty>0).map(r=>({ f:r.f, qty:r.qty, custo:r.custo }));
+    const prods = (s.produtosEvento||[]).map(p=>({ nome:p.nome, qtd:p.qtd, ehInsumo:!!p.ehInsumo, unit: custoProdutoRealizado(p.nome) || p.custo || 0 }));
+    v = { versao:null, rows, produtos:prods, convidados:s.convidados||0, rateio:rateioDoEvento(s), servicos:[],
+          mo: rows.reduce((a,r)=>a+(r.custo||0),0), prod: prods.reduce((a,p)=>a+p.unit*(p.qtd||0),0) };
+    v.total = v.mo + v.prod;
+  }
+  const real = execPreCarga(s);
+
+  // ---- mão de obra ----
+  const moMap = new Map();
+  v.rows.forEach(r=>{ const q = r.qty||0; moMap.set(r.f, { nome:r.f, qOrc:q, unit: q ? (r.custo||0)/q : (PARAMS.custo8h[r.f]||0), qReal:0 }); });
+  const realMo = real.mo || {};
+  if(real.salvo || real.mo){ Object.keys(realMo).forEach(f=>{ const x = moMap.get(f) || { nome:f, qOrc:0, unit:(PARAMS.custo8h[f]||0), qReal:0 }; x.qReal = realMo[f]||0; moMap.set(f,x); }); }
+  else { moMap.forEach(x=>{ x.qReal = x.qOrc; }); }   // sem realizado salvo: considera-se executado como orçado
+  if(real.salvo){ moMap.forEach((x,f)=>{ if(!(f in realMo)) x.qReal = 0; }); }
+
+  // ---- produtos e insumos ----
+  const pMap = new Map();
+  v.produtos.forEach(p=>{
+    const x = pMap.get(p.nome) || { nome:p.nome, qOrc:0, unit:p.unit||0, qReal:0, insumo:!!p.ehInsumo };
+    x.qOrc += p.qtd||0; pMap.set(p.nome, x);
+  });
+  const custoAtual = nome => { const i = INSUMOS.find(z=>z.nome===nome); return i ? i.custo : (custoProdutoRealizado(nome)||0); };
+  const somaReal = (arr, insumo)=>(arr||[]).forEach(r=>{
+    if(!r.item) return;
+    const x = pMap.get(r.item) || { nome:r.item, qOrc:0, unit:custoAtual(r.item), qReal:0, insumo:insumo };
+    x.qReal += parseFloat(r.qtd)||0; pMap.set(r.item, x);
+  });
+  somaReal(real.insumos, true); somaReal(real.produtos, false);
+
+  const classe = (qo, qr)=>{
+    if(qo>0 && Math.abs(qr-qo)<1e-9) return 'Conforme';
+    if(qo>0 && qr<=0) return 'Devolvido (não utilizado)';
+    if(qo>0 && qr<qo) return 'Devolvido parcialmente';
+    if(qo>0 && qr>qo) return 'Acrescido';
+    if(qo<=0 && qr>0) return 'Acrescentado na execução';
+    return 'Conforme';
+  };
+  const fecha = x=>{ x.vOrc = x.qOrc*x.unit; x.vReal = x.qReal*x.unit; x.dq = x.qReal - x.qOrc; x.dv = x.vReal - x.vOrc; x.situ = classe(x.qOrc, x.qReal); return x; };
+  const mo = [...moMap.values()].map(fecha).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+  const prod = [...pMap.values()].map(fecha).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+  const extras = REQ_EXTRAS.filter(r=>r.eventoId===s.id && r.status!=='Cancelada');
+  const soma = (l,k)=>l.reduce((a,x)=>a+x[k],0);
+  const tot = {
+    moOrc: soma(mo,'vOrc'), moReal: soma(mo,'vReal'),
+    prodOrc: soma(prod,'vOrc'), prodReal: soma(prod,'vReal'),
+    extra: extras.reduce((a,r)=>a+(r.custoTotal||0),0)
+  };
+  tot.orc = tot.moOrc + tot.prodOrc; tot.real = tot.moReal + tot.prodReal + tot.extra; tot.dif = tot.real - tot.orc;
+  return { s, v, doOrcamento, serie, aceite: ac||null, hist, mo, prod, extras, tot,
+           devolvidos: mo.concat(prod).filter(x=>x.dq<-1e-9), acrescidos: mo.concat(prod).filter(x=>x.dq>1e-9) };
+}
+function prestacaoSituacao(d){
+  if(d.tot.dif > 0.005) return { rot:'Valor adicional a cobrar do solicitante', cor:'#B23A3A' };
+  if(d.tot.dif < -0.005) return { rot:'Valor a favor do solicitante (economia)', cor:'#2E7D5B' };
+  return { rot:'Realizado dentro do orçamento aprovado', cor:'#1B2A5B' };
+}
+function montarPrestacaoContas(sid){
+  const s = SOLICITACOES.find(x=>x.id===sid); if(!s) return null;
+  const d = prestacaoDados(s);
+  const esc = x=>String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const fq = n=>Number(n).toLocaleString('pt-BR',{maximumFractionDigits:2});
+  const sg = n=>(n>0.005?'+':'')+fmtBRL(n);
+  const sq = n=>(n>1e-9?'+':'')+fq(n);
+  const cor = n=>n>0.005?'#B23A3A':(n<-0.005?'#2E7D5B':'inherit');
+  const sit = prestacaoSituacao(d), v = d.v;
+  const classeBadge = x=>{ const c = x==='Conforme' ? 'ok' : (x.indexOf('Devolvido')===0 ? 'dev' : 'acr'); return '<span class="b '+c+'">'+esc(x)+'</span>'; };
+  const tabItens = (lista, rotulo)=> lista.length
+    ? '<table><thead><tr><th>'+rotulo+'</th><th class="n">Orçado</th><th class="n">Realizado</th><th class="n">Dif.</th><th class="n">Valor unit.</th><th class="n">Orçado (R$)</th><th class="n">Realizado (R$)</th><th class="n">Dif. (R$)</th><th>Situação</th></tr></thead><tbody>' +
+      lista.map(x=>'<tr><td><strong>'+esc(x.nome)+'</strong></td><td class="n">'+fq(x.qOrc)+'</td><td class="n">'+fq(x.qReal)+'</td><td class="n" style="color:'+cor(x.dq)+'">'+sq(x.dq)+'</td><td class="n">'+fmtBRL(x.unit)+'</td><td class="n">'+fmtBRL(x.vOrc)+'</td><td class="n">'+fmtBRL(x.vReal)+'</td><td class="n" style="color:'+cor(x.dv)+'"><strong>'+sg(x.dv)+'</strong></td><td>'+classeBadge(x.situ)+'</td></tr>').join('') + '</tbody></table>'
+    : '<p class="vazio">Sem itens.</p>';
+  const listaDifs = (l, vazio)=> l.length ? '<table><thead><tr><th>Item</th><th class="n">Orçado</th><th class="n">Realizado</th><th class="n">Diferença</th><th class="n">Efeito (R$)</th></tr></thead><tbody>' +
+      l.map(x=>'<tr><td>'+esc(x.nome)+'</td><td class="n">'+fq(x.qOrc)+'</td><td class="n">'+fq(x.qReal)+'</td><td class="n">'+sq(x.dq)+'</td><td class="n" style="color:'+cor(x.dv)+'"><strong>'+sg(x.dv)+'</strong></td></tr>').join('') + '</tbody></table>' : '<p class="vazio">'+vazio+'</p>';
+  const rat = (Array.isArray(v.rateio)&&v.rateio.length) ? v.rateio : rateioDoEvento(s);
+  const horario = (s.horaIni||s.horaFim) ? (s.horaIni||'—')+' às '+(s.horaFim||'—') : '—';
+  const agora = new Date().toLocaleString('pt-BR'), quem = (typeof currentUserName!=='undefined' && currentUserName) ? currentUserName : '';
+  const titulo = 'Prestação de contas — ' + (s.nome||'evento');
+  const campos = [['Data', fmtDataBR(s.data)||'—'], ['Horário', horario], ['Local', s.local||'—'],
+    ['Convidados', (v.convidados||s.convidados||0)], ['Solicitante', s.solicitanteNome||s.solicitante||'—'], ['Departamento', s.departamento||'—'],
+    ['Orçamento aprovado', d.doOrcamento ? ('Versão '+v.versao+(d.serie&&!s.orcamento?' (da série recorrente)':'')+' — '+fmtBRL(v.total)) : 'Valores da solicitação (sem versão formal de orçamento)'],
+    ['Aprovado por', d.aceite ? (esc(d.aceite.por)+' em '+new Date(d.aceite.em).toLocaleString('pt-BR')) : '—'], ['Status', s.status]];
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(titulo)}</title>
+<style>
+  @page{ size:A4 portrait; margin:10mm; }
+  *{ box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body{ font-family:Arial,Helvetica,sans-serif; color:#1B2A5B; margin:0; font-size:12px; background:#fff; }
+  .barra{ position:sticky; top:0; background:#FFF8E1; border-bottom:1px solid #E4D3A0; padding:.6rem 1rem; display:flex; justify-content:space-between; align-items:center; gap:1rem; font-size:13px; }
+  .barra button{ background:#C9A227; color:#1B2A5B; border:0; border-radius:6px; padding:.5rem 1rem; font-weight:bold; cursor:pointer; }
+  .pag{ max-width:980px; margin:0 auto; padding:0 1rem 1rem; }
+  .cab{ border-bottom:3px solid #1B2A5B; padding:.6rem 0 .5rem; margin-bottom:.8rem; display:flex; justify-content:space-between; align-items:flex-end; gap:1rem; }
+  .cab h1{ font-family:Georgia,serif; font-size:1.35rem; margin:0; }
+  .cab .sub{ color:#5B6373; font-size:11px; }
+  h2{ font-family:Georgia,serif; font-size:1.05rem; margin:1.1rem 0 .3rem; padding-bottom:.2rem; border-bottom:2px solid #C9A227; break-after:avoid; }
+  table{ width:100%; border-collapse:collapse; margin:.2rem 0 .5rem; }
+  th,td{ border:1px solid #C9D3E8; padding:.28rem .45rem; text-align:left; vertical-align:top; }
+  th{ background:#EEF3FC; font-size:10.5px; }
+  tr{ break-inside:avoid; page-break-inside:avoid; }
+  thead{ display:table-header-group; }
+  .n{ text-align:right; white-space:nowrap; }
+  .vazio{ color:#8A93A8; font-style:italic; margin:.2rem 0; }
+  .grade{ display:grid; grid-template-columns:repeat(3,1fr); border:1px solid #C9D3E8; margin-bottom:.6rem; }
+  .grade div{ padding:.35rem .55rem; border-right:1px solid #E2E8F5; border-bottom:1px solid #E2E8F5; }
+  .grade span{ display:block; font-size:9.5px; color:#8A93A8; text-transform:uppercase; letter-spacing:.04em; }
+  .kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:.5rem; margin:.4rem 0; }
+  .kpi{ border:1px solid #C9D3E8; border-radius:6px; padding:.5rem .6rem; }
+  .kpi span{ display:block; font-size:9.5px; color:#8A93A8; text-transform:uppercase; letter-spacing:.04em; }
+  .kpi strong{ font-family:Georgia,serif; font-size:1.15rem; }
+  .res{ border-left:6px solid ${sit.cor}; background:#F6F8FD; padding:.6rem .8rem; margin:.6rem 0; font-size:13px; }
+  .res strong{ color:${sit.cor}; font-size:15px; }
+  .b{ border-radius:999px; padding:0 .45rem; font-size:10px; white-space:nowrap; }
+  .b.ok{ background:#E9F3EE; color:#2E7D5B; } .b.dev{ background:#E8F0FB; color:#1B5FA8; } .b.acr{ background:#FBEEEE; color:#B23A3A; }
+  .assina{ margin-top:2rem; display:grid; grid-template-columns:1fr 1fr; gap:2.5rem; font-size:11px; text-align:center; break-inside:avoid; }
+  .assina div{ border-top:1px solid #1B2A5B; padding-top:.3rem; }
+  .rodape{ color:#8A93A8; font-size:10px; border-top:1px solid #D8E1F5; padding-top:.4rem; margin-top:1rem; }
+  @media print{ .barra{ display:none !important; } }
+</style></head><body>
+<div class="barra"><span>Pronto para imprimir. Escolha <strong>Salvar como PDF</strong> e mantenha <strong>Gráficos de fundo</strong> marcado.</span><button onclick="window.print()">Imprimir</button></div>
+<div class="pag">
+<div class="cab"><div><h1>${esc(titulo)}</h1><div class="sub">Clube Sírio — Alimentos e Bebidas · continuação do orçamento aprovado${d.doOrcamento?' (versão '+v.versao+')':''}</div></div><div class="sub">Gerado em ${esc(agora)}${quem?' por '+esc(quem):''}</div></div>
+<div class="grade">${campos.map(c=>'<div><span>'+esc(c[0])+'</span>'+(c[0]==='Aprovado por'?c[1]:esc(c[1]))+'</div>').join('')}</div>
+
+<h2>1. Resumo da prestação de contas</h2>
+<div class="kpis">
+  <div class="kpi"><span>Orçamento aprovado</span><strong>${fmtBRL(d.tot.orc)}</strong></div>
+  <div class="kpi"><span>Realizado</span><strong>${fmtBRL(d.tot.real)}</strong></div>
+  <div class="kpi"><span>Diferença</span><strong style="color:${cor(d.tot.dif)}">${sg(d.tot.dif)}</strong></div>
+  <div class="kpi"><span>Itens alterados</span><strong>${d.devolvidos.length + d.acrescidos.length + d.extras.length}</strong></div>
+</div>
+<div class="res"><strong>${esc(sit.rot)}${Math.abs(d.tot.dif)>0.005?': '+fmtBRL(Math.abs(d.tot.dif)):''}</strong><br>
+Mão de obra: orçado ${fmtBRL(d.tot.moOrc)} → realizado ${fmtBRL(d.tot.moReal)} (${sg(d.tot.moReal-d.tot.moOrc)}) · Produtos e insumos: orçado ${fmtBRL(d.tot.prodOrc)} → realizado ${fmtBRL(d.tot.prodReal)} (${sg(d.tot.prodReal-d.tot.prodOrc)})${d.tot.extra>0?' · Produção extra: '+fmtBRL(d.tot.extra):''}</div>
+
+<h2>2. O que foi devolvido e o que foi acrescentado</h2>
+<h4 style="margin:.4rem 0 .15rem;color:#1B5FA8;">Devolvidos / não utilizados</h4>${listaDifs(d.devolvidos,'Nenhum item foi devolvido: tudo o que foi orçado foi utilizado.')}
+<h4 style="margin:.6rem 0 .15rem;color:#B23A3A;">Acrescidos durante a execução</h4>${listaDifs(d.acrescidos,'Nenhum acréscimo de mão de obra, insumo ou produto sobre o orçamento aprovado.')}
+
+<h2>3. Mão de obra — orçado × realizado</h2>${tabItens(d.mo,'Função')}
+<h2>4. Produtos e insumos — orçado × realizado</h2>${tabItens(d.prod,'Item')}
+
+<h2>5. Produção extra solicitada durante o evento</h2>
+${d.extras.length ? '<table><thead><tr><th>Produto</th><th class="n">Qtd.</th><th class="n">Custo unit.</th><th class="n">Total</th><th>Pedido por</th><th>Quando</th><th>Observação</th></tr></thead><tbody>'+
+  d.extras.map(r=>'<tr><td>'+esc(r.produto)+'</td><td class="n">'+fq(r.qtd)+'</td><td class="n">'+fmtBRL(r.custoUnit||0)+'</td><td class="n"><strong>'+fmtBRL(r.custoTotal||0)+'</strong></td><td>'+esc(r.solicitante||'—')+'</td><td>'+esc(r.quando||'—')+'</td><td>'+esc(r.obs||'')+'</td></tr>').join('')+
+  '<tr><td colspan="3"><strong>Total da produção extra</strong></td><td class="n"><strong>'+fmtBRL(d.tot.extra)+'</strong></td><td colspan="3"></td></tr></tbody></table>' : '<p class="vazio">Não houve requisição de produção extra.</p>'}
+
+<h2>6. Fechamento</h2>
+<table><thead><tr><th></th><th class="n">Orçamento aprovado</th><th class="n">Realizado</th><th class="n">Diferença</th></tr></thead><tbody>
+<tr><td>Mão de obra</td><td class="n">${fmtBRL(d.tot.moOrc)}</td><td class="n">${fmtBRL(d.tot.moReal)}</td><td class="n" style="color:${cor(d.tot.moReal-d.tot.moOrc)}">${sg(d.tot.moReal-d.tot.moOrc)}</td></tr>
+<tr><td>Produtos e insumos</td><td class="n">${fmtBRL(d.tot.prodOrc)}</td><td class="n">${fmtBRL(d.tot.prodReal)}</td><td class="n" style="color:${cor(d.tot.prodReal-d.tot.prodOrc)}">${sg(d.tot.prodReal-d.tot.prodOrc)}</td></tr>
+<tr><td>Produção extra</td><td class="n">${fmtBRL(0)}</td><td class="n">${fmtBRL(d.tot.extra)}</td><td class="n" style="color:${cor(d.tot.extra)}">${sg(d.tot.extra)}</td></tr>
+<tr style="font-weight:bold;background:#EEF3FC;"><td>TOTAL</td><td class="n">${fmtBRL(d.tot.orc)}</td><td class="n">${fmtBRL(d.tot.real)}</td><td class="n" style="color:${cor(d.tot.dif)}">${sg(d.tot.dif)}</td></tr></tbody></table>
+${rat.length ? '<h4 style="margin:.6rem 0 .15rem;">Rateio do custo realizado</h4><table><thead><tr><th>Centro de custo</th><th>Projeto</th><th class="n">%</th><th class="n">Valor realizado</th></tr></thead><tbody>'+
+  rat.map(l=>'<tr><td>'+esc(l.cc||'—')+'</td><td>'+esc(l.projeto||'—')+'</td><td class="n">'+fq(Number(l.pct)||0)+'%</td><td class="n">'+fmtBRL(d.tot.real*(Number(l.pct)||0)/100)+'</td></tr>').join('')+'</tbody></table>' : ''}
+
+${d.hist.length ? '<h2>7. Histórico do orçamento</h2><table><thead><tr><th>Versão</th><th>Enviada por</th><th>Em</th><th class="n">Total</th><th>Situação</th></tr></thead><tbody>'+
+  d.hist.map(h=>'<tr><td>'+h.versao+'</td><td>'+esc(h.por||'—')+'</td><td>'+new Date(h.em).toLocaleString('pt-BR')+'</td><td class="n">'+fmtBRL(h.total)+'</td><td>'+(d.aceite&&d.aceite.versao===h.versao?'<strong>Aprovada</strong>'+(d.aceite.por?' por '+esc(d.aceite.por):''):'—')+'</td></tr>').join('')+'</tbody></table>' : ''}
+${v.observacao ? '<p style="white-space:pre-wrap;background:#FFF8E1;border-left:5px solid #C9A227;padding:.5rem .7rem;"><strong>Observações do evento</strong><br>'+esc(v.observacao)+'</p>' : ''}
+
+<div class="assina"><div>Ciente — ${esc(s.solicitanteNome||s.solicitante||'solicitante')}</div><div>Alimentos e Bebidas</div></div>
+<div class="rodape">Itens do orçamento valorizados pelo preço do orçamento aprovado; itens acrescentados na execução, pelo custo vigente. A análise dos quantitativos em relação à quantidade de convidados informada é de responsabilidade da área de Alimentos e Bebidas.</div>
+</div></body></html>`;
+}
+function prestacaoAbrir(sid){
+  const html = _comMemoProdutos(function(){ return montarPrestacaoContas(sid); });
+  if(!html){ showToast('Evento não encontrado'); return; }
+  const s = SOLICITACOES.find(x=>x.id===sid) || {};
+  let win = null;
+  try{ win = window.open('', '_blank'); }catch(e){ win = null; }
+  if(win && win.document){
+    win.document.open(); win.document.write(html); win.document.close();
+    showToast('Prestação de contas aberta em nova janela');
+  } else {
+    baixarArquivo('prestacao_de_contas_' + String(s.nome||'evento').replace(/[^\w]+/g,'_') + '.html', html, 'text/html');
+    showToast('Janela bloqueada pelo navegador — relatório baixado como arquivo');
+  }
+}
+function prestacaoTextoEmail(s, d){
+  const br = n=>'R$ '+(Number(n)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const sg = n=>(n>0.005?'+':'')+br(n);
+  const q = n=>Number(n).toLocaleString('pt-BR',{maximumFractionDigits:2});
+  const L = [];
+  L.push('Prestação de contas — ' + (s.nome||'evento'));
+  L.push('Data: ' + (fmtDataBR(s.data)||'') + '   Local: ' + (s.local||'—'));
+  L.push('Orçamento aprovado: ' + (d.doOrcamento ? 'versão ' + d.v.versao : 'valores da solicitação') + ' — ' + br(d.tot.orc));
+  L.push('');
+  L.push('RESUMO');
+  L.push('  Mão de obra: orçado ' + br(d.tot.moOrc) + ' → realizado ' + br(d.tot.moReal));
+  L.push('  Produtos e insumos: orçado ' + br(d.tot.prodOrc) + ' → realizado ' + br(d.tot.prodReal));
+  if(d.tot.extra > 0) L.push('  Produção extra: ' + br(d.tot.extra));
+  L.push('  TOTAL REALIZADO: ' + br(d.tot.real) + '  (diferença ' + sg(d.tot.dif) + ')');
+  L.push('  ' + prestacaoSituacao(d).rot + (Math.abs(d.tot.dif)>0.005 ? ': ' + br(Math.abs(d.tot.dif)) : ''));
+  L.push('');
+  if(d.devolvidos.length){ L.push('DEVOLVIDOS / NÃO UTILIZADOS'); d.devolvidos.forEach(x=>L.push('  ' + x.nome + ': orçado ' + q(x.qOrc) + ', realizado ' + q(x.qReal) + ' (' + sg(x.dv) + ')')); L.push(''); }
+  if(d.acrescidos.length){ L.push('ACRESCIDOS NA EXECUÇÃO'); d.acrescidos.forEach(x=>L.push('  ' + x.nome + ': orçado ' + q(x.qOrc) + ', realizado ' + q(x.qReal) + ' (' + sg(x.dv) + ')')); L.push(''); }
+  if(d.extras.length){ L.push('PRODUÇÃO EXTRA'); d.extras.forEach(r=>L.push('  ' + q(r.qtd) + 'x ' + r.produto + ' — ' + br(r.custoTotal||0))); L.push(''); }
+  L.push('O detalhe completo está no relatório de prestação de contas (aba Relatório, em "Prestação de contas").');
+  L.push('');
+  L.push(ORC_TEXTO_RESP);
+  return L.join('\n');
+}
+function prestacaoEmail(sid){
+  const s = SOLICITACOES.find(x=>x.id===sid); if(!s) return;
+  const dest = String(s.solicitante || '').trim();
+  if(dest.indexOf('@') < 0){ showToast('O evento não tem o e-mail do solicitante registrado'); return; }
+  const d = _comMemoProdutos(function(){ return prestacaoDados(s); });
+  const assunto = 'Prestação de contas — ' + (s.nome||'evento') + ' — ' + (fmtDataBR(s.data)||'') + ' — ' + fmtBRL(d.tot.real);
+  const url = 'mailto:' + encodeURIComponent(dest) + '?subject=' + encodeURIComponent(assunto) + '&body=' + encodeURIComponent(prestacaoTextoEmail(s, d));
+  try{ window.location.href = url; }catch(e){ window.open(url,'_blank'); }
+  showToast('Abrindo seu programa de e-mail para ' + dest);
+}
+const PREST_UI = { busca:'', mostrar:10 };
+function renderPrestacoes(){
+  const box = document.getElementById('prest-lista'); if(!box) return;
+  const q = normNome(PREST_UI.busca||'');
+  const todos = SOLICITACOES.filter(s=>s.status==='Concluído' && podeVerEvento(s))
+    .filter(s=>!q || q.split(' ').every(w=>normNome([s.nome,s.solicitanteNome,s.solicitante,s.departamento,s.local].join(' ')).indexOf(w)>=0))
+    .sort((a,b)=>(b.data||'').localeCompare(a.data||''));
+  const maisBox = document.getElementById('prest-mais');
+  if(!todos.length){ box.innerHTML = '<div class="empty" style="display:block;">' + (PREST_UI.busca ? 'Nenhum evento concluído encontrado para esta busca.' : 'Nenhum evento concluído ainda. Quando um evento for concluído na aba Executar, a prestação de contas aparece aqui.') + '</div>'; if(maisBox) maisBox.style.display='none'; return; }
+  const mostrar = todos.slice(0, PREST_UI.mostrar);
+  box.innerHTML = '<table><thead><tr><th>Evento</th><th>Data</th><th>Solicitante</th><th class="n" style="text-align:right">Orçado</th><th style="text-align:right">Realizado</th><th style="text-align:right">Diferença</th><th></th></tr></thead><tbody>' +
+    mostrar.map(s=>{
+      const d = prestacaoDados(s), cor = d.tot.dif>0.005?'var(--red)':(d.tot.dif<-0.005?'var(--green)':'inherit');
+      return '<tr><td><strong>' + String(s.nome||'').replace(/</g,'&lt;') + '</strong>' + ((s.serieId||s.recorrencia)?' 🔁':'') + '</td><td>' + (fmtDataBR(s.data)||'—') + '</td><td>' + String(s.solicitanteNome||s.solicitante||'—').replace(/</g,'&lt;') + '</td>' +
+        '<td style="text-align:right">' + fmtBRL(d.tot.orc) + '</td><td style="text-align:right">' + fmtBRL(d.tot.real) + '</td>' +
+        '<td style="text-align:right;font-weight:bold;color:' + cor + '">' + (d.tot.dif>0.005?'+':'') + fmtBRL(d.tot.dif) + '</td>' +
+        '<td style="white-space:nowrap;text-align:right"><button class="btn sm gold" onclick="prestacaoAbrir(\'' + s.id + '\')">Abrir prestação</button> <button class="btn sm secondary" onclick="prestacaoEmail(\'' + s.id + '\')">E-mail</button></td></tr>';
+    }).join('') + '</tbody></table>' +
+    '<div class="hint" style="text-transform:none;font-weight:normal;margin-top:.4rem;">Mostrando ' + mostrar.length + ' de ' + todos.length + ' evento(s) concluído(s).</div>';
+  if(maisBox) maisBox.style.display = todos.length > mostrar.length ? '' : 'none';
+}
+(function(){
+  const b = document.getElementById('prest-busca'); if(!b) return;
+  let deb = null;
+  b.addEventListener('input', function(){ clearTimeout(deb); const v = this.value; deb = setTimeout(()=>{ PREST_UI.busca = v; PREST_UI.mostrar = 10; renderPrestacoes(); }, 200); });
+  document.getElementById('prest-mais-btn').addEventListener('click', ()=>{ PREST_UI.mostrar += 10; renderPrestacoes(); });
+})();
+
 let produtoDatalistBuilt = false;
 function ensureProdutoDatalist(){
   if(produtoDatalistBuilt) return;
@@ -10103,6 +10448,7 @@ function initRelatorioOperacional(){
 
 function renderRelatorio(){ return _comMemoProdutos(function(){
   try{ renderRecorrentes(); }catch(e){ console.warn('recorrentes:', e); }
+  try{ renderPrestacoes(); }catch(e){ console.warn('prestação de contas:', e); }
   const body = document.getElementById('rel-body');
   const empty = document.getElementById('rel-empty');
   relFiltroSetorOpcoes();
