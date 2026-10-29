@@ -399,6 +399,14 @@
 .notif-card h4{margin:0 0 .2rem;font-family:Georgia,serif;color:var(--navy);font-size:.98rem;}
 .notif-guia{background:var(--ice-light);border-radius:6px;padding:.6rem .8rem;margin:.6rem 0;font-size:.86rem;line-height:1.5;}
 .notif-guia ul{margin:.3rem 0 0 1.1rem;padding:0;}
+.exec-chips{display:flex;flex-wrap:wrap;gap:.45rem;}
+.exec-chip{border:1px solid var(--border);background:#fff;color:var(--navy);border-radius:999px;padding:.4rem .9rem;font-size:.82rem;cursor:pointer;font-family:Arial,Helvetica,sans-serif;}
+.exec-chip b{margin-left:.35rem;background:var(--ice-light);border-radius:999px;padding:0 .45rem;font-size:.74rem;}
+.exec-chip.ativo{background:var(--navy);color:#fff;border-color:var(--navy);}
+.exec-chip.ativo b{background:rgba(255,255,255,.2);color:#fff;}
+.exec-chip.alerta b{background:#FBEEEE;color:#B23A3A;}
+.exec-dia{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;margin:1.1rem 0 .3rem;padding:0 .2rem .25rem;border-bottom:2px solid var(--gold);font-family:Georgia,serif;color:var(--navy);font-size:1.02rem;font-weight:bold;}
+.exec-dia span{font-family:Arial,Helvetica,sans-serif;font-weight:normal;font-size:.76rem;color:var(--gray);}
 </style>
 <style id="layout-2niveis">
 /* ===== LAYOUT DE DOIS NÍVEIS: grupos no topo + submenus na lateral ===== */
@@ -1343,7 +1351,22 @@ teresa cristina - teresa.cristina@sirio.org.br"></textarea>
         <button class="btn secondary" onclick="exportarDetalhamentoEventos()" style="margin-left:.4rem;">Exportar detalhamento de todos os eventos (CSV)</button>
       </div>
 
+      <div class="card" id="exec-barra" style="display:none;">
+        <div class="exec-chips" id="exec-chips"></div>
+        <div class="row3" style="margin-top:.7rem;">
+          <div><label>Buscar</label><input type="text" id="exec-busca" placeholder="Nome, local ou solicitante..."></div>
+          <div><label>Situação</label><select id="exec-status"><option value="">Todas</option><option value="Aprovado">Aprovado (a executar)</option><option value="Em Execução">Em execução</option></select></div>
+          <div><label>Departamento</label><select id="exec-depto"><option value="">Todos</option></select></div>
+        </div>
+        <div class="hint" id="exec-resumo" style="text-transform:none;font-weight:normal;margin-top:.5rem;"></div>
+        <div class="row3" style="margin-top:.9rem;padding-top:.8rem;border-top:1px dashed var(--border);align-items:end;">
+          <div><label>Relatório operacional — dia</label><input type="date" id="exec-rel-dia"></div>
+          <div><button class="btn gold" id="exec-rel-btn">Relatório do dia (cozinha e bar)</button></div>
+          <div class="hint" style="text-transform:none;font-weight:normal;">Agenda, produção consolidada e a ficha de cada evento, com colunas para marcar "preparado" e "entregue".</div>
+        </div>
+      </div>
       <div id="exec-list"></div>
+      <div style="text-align:center;margin:.8rem 0;display:none;" id="exec-mais"><button class="btn secondary" id="exec-mais-btn">Mostrar mais</button></div>
       <div class="empty" id="exec-empty" style="display:none;">Nenhum evento aprovado aguardando execução.</div>
     </div>
 
@@ -6750,9 +6773,14 @@ function initReqExtra(){
 function popularEventosRex(){
   const sel = document.getElementById('rex-evento');
   if(!sel) return;
-  const evs = eventosAbertos();
+  const todos = eventosAbertos();
+  const hojeR = execHojeIso(), de = recSomaDias(hojeR,-14), ate = recSomaDias(hojeR,14);
+  // só o que está em execução ou acontece em torno de hoje; com as séries recorrentes a lista inteira ficava enorme
+  let evs = todos.filter(s=>s.status==='Em Execução' || (s.data && s.data>=de && s.data<=ate));
+  if(!evs.length) evs = todos.slice(0,40);
+  evs = evs.slice().sort((a,b)=>(a.data||'').localeCompare(b.data||''));
   sel.innerHTML = evs.length
-    ? evs.map(s=>`<option value="${s.id}">${s.nome} — ${s.data||'sem data'} (CC ${s.centroCusto})</option>`).join('')
+    ? evs.map(s=>`<option value="${s.id}">${s.nome} — ${fmtDataBR(s.data)||'sem data'} (CC ${s.centroCusto})</option>`).join('')
     : '<option value="">Nenhum evento aprovado em aberto</option>';
 }
 
@@ -8855,21 +8883,75 @@ function initMesCorrente(){
   renderMesCorrente();
 }
 
-function renderExecucao(){
+/* Tela de execução: barra de visões e filtros no topo, eventos agrupados por dia e detalhe aberto sob
+   demanda. Antes era uma lista única de todos os eventos aprovados (com as séries recorrentes, centenas),
+   e cada evento montava o formulário completo mesmo fechado. */
+const EXEC_UI = { vista:'sem', busca:'', status:'', depto:'', mostrar:20, abertos:new Set() };
+function execHojeIso(){ return recIso(new Date()); }
+function execVistaOk(s, v, hoje, lim7, mesAtual){
+  const d = s.data || '';
+  if(v==='tudo') return true;
+  if(v==='pend') return !d || d < hoje;              // já passou e ainda não foi concluído
+  if(v==='hoje') return d === hoje;
+  if(v==='sem')  return d >= hoje && d <= lim7;
+  if(v==='mes')  return d.slice(0,7) === mesAtual;
+  return true;
+}
+function execRotuloDia(iso, hoje){
+  if(!iso) return 'Sem data';
+  if(iso === hoje) return 'Hoje';
+  if(iso === recSomaDias(hoje,1)) return 'Amanhã';
+  if(iso === recSomaDias(hoje,-1)) return 'Ontem';
+  const dn = REC_DIAS[recDate(iso).getDay()];
+  return dn.charAt(0).toUpperCase() + dn.slice(1);
+}
+function renderExecucao(){ return _comMemoProdutos(_renderExecucao); }   // custo de cada produto é calculado uma vez por desenho
+function _renderExecucao(){
   const list = document.getElementById('exec-list');
   const empty = document.getElementById('exec-empty');
-  const pend = SOLICITACOES.filter(s=>podeVerEvento(s) && (s.status==='Aprovado' || s.status==='Em Execução'));
-  if(pend.length===0){ list.innerHTML=''; empty.style.display='block'; return; }
-  empty.style.display='none';
+  const barra = document.getElementById('exec-barra');
+  const maisBox = document.getElementById('exec-mais');
+  const base = SOLICITACOES.filter(s=>podeVerEvento(s) && (s.status==='Aprovado' || s.status==='Em Execução'));
+  if(base.length===0){ list.innerHTML=''; empty.style.display='block'; if(barra) barra.style.display='none'; if(maisBox) maisBox.style.display='none'; return; }
+  empty.style.display='none'; if(barra) barra.style.display='';
+  { const rd = document.getElementById('exec-rel-dia'); if(rd && !rd.value) rd.value = execHojeIso(); }
+  const deptoDe = s => String(s.departamento || '').trim() || 'Sem departamento informado';
 
-  // Agrupa por centro de custo: cada setor abre e fecha, como os meses da
-  // aba Indicadores, para a tela não virar uma rolagem única.
-  const grupos = {};
-  pend.forEach(s=>{
-    const k = String(s.departamento || '').trim() || 'Sem departamento informado';
-    (grupos[k] = grupos[k] || []).push(s);
-  });
-  const chaves = Object.keys(grupos).sort();
+  // opções de departamento (mantém a seleção)
+  const selD = document.getElementById('exec-depto');
+  if(selD){
+    const deps = [...new Set(base.map(deptoDe))].sort();
+    const atual = EXEC_UI.depto;
+    selD.innerHTML = '<option value="">Todos</option>' + deps.map(d=>`<option value="${d.replace(/"/g,'&quot;')}"${d===atual?' selected':''}>${d}</option>`).join('');
+  }
+
+  const q = normNome(EXEC_UI.busca||'');
+  const casa = s=>{
+    if(EXEC_UI.status && s.status !== EXEC_UI.status) return false;
+    if(EXEC_UI.depto && deptoDe(s) !== EXEC_UI.depto) return false;
+    if(q){
+      const alvo = normNome([s.nome, s.local, s.solicitanteNome, s.solicitante, s.criadoPor, s.departamento].join(' '));
+      if(!q.split(' ').every(w=>alvo.indexOf(w) >= 0)) return false;
+    }
+    return true;
+  };
+  const filtrados = base.filter(casa);
+  const hoje = execHojeIso(), lim7 = recSomaDias(hoje,7), mesAtual = hoje.slice(0,7);
+  const cont = { pend:0, hoje:0, sem:0, mes:0, tudo:filtrados.length };
+  filtrados.forEach(s=>{ ['pend','hoje','sem','mes'].forEach(v=>{ if(execVistaOk(s,v,hoje,lim7,mesAtual)) cont[v]++; }); });
+  const chips = [['pend','Pendentes de fechamento','alerta'],['hoje','Hoje',''],['sem','Próximos 7 dias',''],['mes','Este mês',''],['tudo','Todos','']];
+  document.getElementById('exec-chips').innerHTML = chips.map(c=>
+    `<button class="exec-chip${EXEC_UI.vista===c[0]?' ativo':''}${c[2]&&cont[c[0]]?' '+c[2]:''}" data-vista="${c[0]}">${c[1]}<b>${cont[c[0]]}</b></button>`).join('');
+
+  const visiveis = filtrados.filter(s=>execVistaOk(s, EXEC_UI.vista, hoje, lim7, mesAtual))
+    .sort((a,b)=> (a.data||'').localeCompare(b.data||'') || (a.horaIni||'').localeCompare(b.horaIni||''));
+  const mostrados = visiveis.slice(0, EXEC_UI.mostrar);
+  const totPrev = visiveis.reduce((a,s)=>a + (s.previsto?s.previsto.custoMO:0) + custoPrevistoProdutos(s), 0);
+  document.getElementById('exec-resumo').textContent = visiveis.length
+    ? `Mostrando ${mostrados.length} de ${visiveis.length} evento(s) · previsto ${fmtBRL(totPrev)}`
+    : 'Nenhum evento nesta visão. Troque a visão acima ou ajuste a busca.';
+  if(maisBox) maisBox.style.display = visiveis.length > mostrados.length ? '' : 'none';
+  const evMap = new Map(visiveis.map(s=>[s.id, s]));
 
   const cardHTML = (s)=>{
     /* Antes do primeiro "Salvar realizado", a tela já vem com tudo o que foi escolhido na etapa
@@ -8921,49 +9003,221 @@ function renderExecucao(){
     </div>`;
   };
 
-  list.innerHTML = chaves.map((cc, i)=>{
-    const evs = grupos[cc];
-    const totPrev = evs.reduce((a,s)=>a + (s.previsto?s.previsto.custoMO:0) + custoPrevistoProdutos(s), 0);
-    const fechado = i > 0;   // primeiro setor aberto, demais fechados
-    return `<div class="setor-grupo">
-      <h2 class="setor-toggle mes-toggle">
-        <span class="sinal">${fechado?'+':'−'}</span>
-        <span>${cc}</span>
-        <span class="mes-resumo">${evs.length} evento(s) · previsto ${fmtBRL(totPrev)}</span>
-      </h2>
-      <div class="setor-corpo${fechado?' fechado':''}">${evs.map(s=>{
+  // agrupa por dia
+  const dias = {};
+  mostrados.forEach(s=>{ const k = s.data || ''; (dias[k] = dias[k] || []).push(s); });
+  list.innerHTML = Object.keys(dias).sort().map(k=>{
+    const evs = dias[k];
+    const prevDia = evs.reduce((a,s)=>a + (s.previsto?s.previsto.custoMO:0) + custoPrevistoProdutos(s), 0);
+    return `<div class="exec-dia">${execRotuloDia(k,hoje)}${k?' — '+fmtDataBR(k):''}<span>${evs.length} evento(s) · previsto ${fmtBRL(prevDia)}</span></div>` +
+      evs.map(s=>{
         const hora = (s.horaIni||s.horaFim) ? `${s.horaIni||'—'} às ${s.horaFim||'—'}` : 'horário não informado';
-        return `<div class="evento-item">
+        const aberto = EXEC_UI.abertos.has(s.id);
+        return `<div class="evento-item" id="exec-ev-${s.id}">
           <div class="evento-cab" data-ev="${s.id}">
-            <span class="sinal">+</span>
-            <span class="evento-nome">${s.nome||'(sem nome)'}</span>
-            <span class="evento-quando">${fmtDataBR(s.data)||'sem data'} · ${hora}</span>
-            <span class="evento-tags">${statusBadge(s.status)} ${s.local?`<span class="badge">${s.local}</span>`:''}</span>
+            <span class="sinal">${aberto?'−':'+'}</span>
+            <span class="evento-nome">${s.nome||'(sem nome)'}${(s.serieId||s.recorrencia)?' <span title="Evento recorrente">🔁</span>':''}</span>
+            <span class="evento-quando">${hora} · ${s.convidados||0} conv.</span>
+            <span class="evento-tags">${statusBadge(s.status)} ${s.local?`<span class="badge">${s.local}</span>`:''} <span class="badge">${deptoDe(s)}</span></span>
           </div>
-          <div class="evento-detalhe fechado">${cardHTML(s)}</div>
+          <div class="evento-detalhe${aberto?'':' fechado'}" data-pronto="0"></div>
         </div>`;
-      }).join('')}</div>
-    </div>`;
+      }).join('');
   }).join('');
 
-  list.querySelectorAll('.evento-cab').forEach(cab=>{
+  // o detalhe só é montado quando o evento é aberto
+  const montar = (item)=>{
+    const det = item.querySelector('.evento-detalhe'); const sid = item.querySelector('.evento-cab').dataset.ev;
+    if(det.dataset.pronto === '1') return;
+    const s = evMap.get(sid); if(!s) return;
+    _comMemoProdutos(function(){ det.innerHTML = cardHTML(s); det.dataset.pronto = '1'; renderContaEvento(s.id); });
+  };
+  list.querySelectorAll('.evento-item').forEach(item=>{
+    const cab = item.querySelector('.evento-cab');
+    if(EXEC_UI.abertos.has(cab.dataset.ev)) montar(item);
     cab.addEventListener('click', ()=>{
-      const det = cab.parentNode.querySelector('.evento-detalhe');
+      const det = item.querySelector('.evento-detalhe');
       const fech = det.classList.toggle('fechado');
       cab.querySelector('.sinal').textContent = fech ? '+' : '−';
+      if(fech) EXEC_UI.abertos.delete(cab.dataset.ev); else { EXEC_UI.abertos.add(cab.dataset.ev); montar(item); }
     });
   });
-
-  list.querySelectorAll('.setor-toggle').forEach(t=>{
-    t.addEventListener('click', ()=>{
-      const corpo = t.parentNode.querySelector('.setor-corpo');
-      const fech = corpo.classList.toggle('fechado');
-      t.querySelector('.sinal').textContent = fech ? '+' : '−';
-    });
-  });
-
-  pend.forEach(s=>renderContaEvento(s.id));
 }
+/* Controles da barra: ligados uma vez; a lista é redesenhada, a barra não. */
+(function(){
+  const chips = document.getElementById('exec-chips'); if(!chips) return;
+  chips.addEventListener('click', e=>{
+    const b = e.target.closest('[data-vista]'); if(!b) return;
+    EXEC_UI.vista = b.dataset.vista; EXEC_UI.mostrar = 20; renderExecucao();
+  });
+  let deb = null;
+  document.getElementById('exec-busca').addEventListener('input', function(){
+    clearTimeout(deb); const v = this.value;
+    deb = setTimeout(()=>{ EXEC_UI.busca = v; EXEC_UI.mostrar = 20; renderExecucao(); }, 200);
+  });
+  document.getElementById('exec-status').addEventListener('change', function(){ EXEC_UI.status = this.value; EXEC_UI.mostrar = 20; renderExecucao(); });
+  document.getElementById('exec-depto').addEventListener('change', function(){ EXEC_UI.depto = this.value; EXEC_UI.mostrar = 20; renderExecucao(); });
+  document.getElementById('exec-mais-btn').addEventListener('click', ()=>{ EXEC_UI.mostrar += 20; renderExecucao(); });
+})();
+/* ============ RELATÓRIO OPERACIONAL DO DIA (cozinha e bar) ============
+   Para imprimir pela manhã: agenda, produção consolidada por setor e uma ficha por evento com
+   tudo o que precisa ser preparado e entregue. */
+function opSetorItem(nome){
+  const mp = _fichaMapas();
+  const f = mp.porNome.get(nome) || mp.porNorm.get(normNome(nome));
+  if(f) return /bebida/i.test(f.pontoVenda||'') ? 'Bar' : 'Cozinha';
+  return /\b(CERVEJA|CHOPP|CHOPE|VINHO|ESPUMANTE|CHAMPAGNE|WHISKY|WISKY|VODKA|GIN|RUM|CACHACA|LICOR|CAIPIRINHA|CAIPI|DRINK|COQUETEL|REFRIGERANTE|REFRI|COCA|GUARANA|SUCO|AGUA|TONICA|ENERGETICO|CAFE|GELO|BEBIDA|BEBIDAS)\b/.test(normNome(nome)) ? 'Bar' : 'Cozinha';
+}
+/* Itens a preparar de um evento: o que foi pedido na solicitação (ou o realizado já salvo). */
+function opItensEvento(s){
+  const out = [];
+  const soma = (nome, qtd, un)=>{
+    if(!nome || !(qtd > 0)) return;
+    const x = out.find(r=>r.nome === nome && r.un === (un||'un'));
+    if(x) x.qtd = Math.round((x.qtd + qtd)*100)/100; else out.push({ nome, qtd:Math.round(qtd*100)/100, un: un || 'un' });
+  };
+  if(s.realizado){
+    const r = execPreCarga(s);
+    (r.produtos||[]).forEach(x=>soma(x.item, parseFloat(x.qtd)||0, 'porção'));
+    (r.insumos||[]).forEach(x=>soma(x.item, parseFloat(x.qtd)||0, 'un'));
+  } else if((s.produtosEvento||[]).length){
+    s.produtosEvento.forEach(p=>soma(p.nome, parseFloat(p.qtd)||0, p.un || (p.ehInsumo ? 'un' : 'porção')));
+  } else if(s.previsto && Array.isArray(s.previsto.produtos) && s.previsto.produtos.length){
+    s.previsto.produtos.forEach(p=>soma(p.nome, p.qtd||0, 'porção'));
+  } else if(s.previsto && Array.isArray(s.previsto.itens)){
+    s.previsto.itens.forEach(it=>soma(it.nome, (it.qtdPorPessoa||0) * (s.convidados||0), it.un || 'un'));
+  }
+  out.forEach(r=>{ r.setor = opSetorItem(r.nome); });
+  return out;
+}
+function montarRelatorioDia(iso){
+  const esc = x=>String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const fq = n=>Number(n).toLocaleString('pt-BR',{maximumFractionDigits:2});
+  const evs = SOLICITACOES.filter(s=>s.data===iso && (s.status==='Aprovado' || s.status==='Em Execução') && podeVerEvento(s))
+    .sort((a,b)=>(a.horaIni||'99').localeCompare(b.horaIni||'99') || (a.nome||'').localeCompare(b.nome||''));
+  if(!evs.length) return null;
+  const dn = REC_DIAS[recDate(iso).getDay()];
+  const titulo = 'Relatório operacional do dia — ' + dn + ', ' + fmtDataBR(iso);
+  const horaDe = s=>(s.horaIni||s.horaFim) ? (s.horaIni||'—') + ' às ' + (s.horaFim||'—') : 'horário não informado';
+  const itensPor = new Map(evs.map(s=>[s.id, opItensEvento(s)]));
+
+  // produção consolidada do dia, por setor
+  const cons = { Cozinha:new Map(), Bar:new Map() };
+  evs.forEach(s=>itensPor.get(s.id).forEach(it=>{
+    const m = cons[it.setor], k = it.nome + '|' + it.un;
+    const x = m.get(k) || { nome:it.nome, un:it.un, qtd:0, onde:[] };
+    x.qtd += it.qtd; x.onde.push((s.horaIni||'—') + ' ' + (s.nome||'') + ' (' + fq(it.qtd) + ')');
+    m.set(k, x);
+  }));
+  const tabCons = setor=>{
+    const lista = [...cons[setor].values()].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+    if(!lista.length) return '<p class="vazio">Nada a preparar para este setor.</p>';
+    return '<table><thead><tr><th style="width:36%">Item</th><th class="n" style="width:9%">Total</th><th style="width:8%">Un.</th><th>Para quais eventos (hora, evento, quantidade)</th><th class="chk">Pronto</th></tr></thead><tbody>' +
+      lista.map(x=>'<tr><td><strong>'+esc(x.nome)+'</strong></td><td class="n"><strong>'+fq(x.qtd)+'</strong></td><td>'+esc(x.un)+'</td><td class="peq">'+esc(x.onde.join(' · '))+'</td><td class="chk"><span class="cx"></span></td></tr>').join('') +
+      '</tbody></table>';
+  };
+
+  const totConv = evs.reduce((a,s)=>a+(s.convidados||0),0);
+  const agenda = '<table><thead><tr><th>Horário</th><th>Evento</th><th>Local</th><th class="n">Convid.</th><th>Serviço</th><th>Solicitante</th><th>Bar</th></tr></thead><tbody>' +
+    evs.map(s=>'<tr><td style="white-space:nowrap"><strong>'+esc(horaDe(s))+'</strong></td><td><strong>'+esc(s.nome||'')+'</strong>'+((s.serieId||s.recorrencia)?' 🔁':'')+
+      (s.status==='Em Execução'?' <span class="tag">em execução</span>':'')+'</td><td>'+esc(s.local||'—')+'</td><td class="n">'+(s.convidados||0)+'</td><td>'+esc([s.tipoEvento,s.tipoServico].filter(Boolean).join(' · ')||'—')+
+      '</td><td>'+esc(s.solicitanteNome||s.solicitante||'—')+'</td><td>'+(s.precisaBar==='Sim'?('Sim'+(s.qtdBares?' ('+s.qtdBares+')':'')):'—')+'</td></tr>').join('') +
+    '</tbody></table>';
+
+  const fichas = evs.map(s=>{
+    const itens = itensPor.get(s.id);
+    const mo = ((s.previsto && s.previsto.rows)||[]).filter(r=>r.qty>0);
+    const tabItens = setor=>{
+      const l = itens.filter(i=>i.setor===setor).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+      if(!l.length) return '';
+      return '<h4>'+setor+'</h4><table><thead><tr><th>Item</th><th class="n" style="width:11%">Qtd.</th><th style="width:10%">Un.</th><th class="chk">Preparado</th><th class="chk">Entregue</th></tr></thead><tbody>' +
+        l.map(i=>'<tr><td>'+esc(i.nome)+'</td><td class="n"><strong>'+fq(i.qtd)+'</strong></td><td>'+esc(i.un)+'</td><td class="chk"><span class="cx"></span></td><td class="chk"><span class="cx"></span></td></tr>').join('') + '</tbody></table>';
+    };
+    const campos = [
+      ['Horário', horaDe(s)], ['Local', s.local||'—'], ['Convidados', s.convidados||0],
+      ['Solicitante', s.solicitanteNome||s.solicitante||'—'], ['Departamento', s.departamento||'—'],
+      ['Tipo de evento', s.tipoEvento||'—'], ['Serviço', s.tipoServico||'—'],
+      ['Atendimento', (s.precisaAtendimento||'—') + (s.atendimento?' · '+s.atendimento:'')],
+      ['Bar', s.precisaBar==='Sim' ? 'Sim' + (s.qtdBares?' — '+s.qtdBares+' ponto(s) de bar':'') : 'Não']
+    ];
+    return '<section class="ficha"><div class="fh"><div class="fh1">'+esc(s.nome||'(sem nome)')+((s.serieId||s.recorrencia)?' 🔁':'')+'</div><div class="fh2">'+esc(horaDe(s))+' · '+esc(s.local||'local não informado')+' · '+(s.convidados||0)+' convidados</div></div>' +
+      '<div class="grade">'+campos.map(c=>'<div><span>'+esc(c[0])+'</span>'+esc(c[1])+'</div>').join('')+'</div>' +
+      (s.observacao ? '<div class="obs"><strong>Observações do solicitante</strong><br>'+esc(s.observacao)+'</div>' : '') +
+      ((s.servicos&&s.servicos.length) ? '<h4>Serviços contratados</h4><ul class="srv">'+s.servicos.map(x=>'<li>'+esc(x.nome)+(x.pax?' — '+x.pax+' pessoa(s)':'')+'</li>').join('')+'</ul>' : '') +
+      '<h3>O que preparar e entregar</h3>' +
+      ((tabItens('Cozinha')+tabItens('Bar')) || '<p class="vazio">Nenhum produto lançado nesta solicitação. Confirme o cardápio com o solicitante.</p>') +
+      '<h3>Equipe</h3>' +
+      (mo.length ? '<table><thead><tr><th>Função</th><th class="n" style="width:12%">Qtd.</th><th>Nomes / observações</th></tr></thead><tbody>'+mo.map(r=>'<tr><td>'+esc(r.f)+'</td><td class="n"><strong>'+r.qty+'</strong></td><td></td></tr>').join('')+'</tbody></table>' : '<p class="vazio">Nenhuma mão de obra prevista.</p>') +
+      '<div class="assina"><div>Conferido por: ______________________________</div><div>Hora da entrega: ____ : ____</div><div>Ocorrências: ______________________________________________</div></div></section>';
+  }).join('');
+
+  const agora = new Date().toLocaleString('pt-BR'), quem = (typeof currentUserName!=='undefined' && currentUserName) ? currentUserName : '';
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(titulo)}</title>
+<style>
+  @page{ size:A4 portrait; margin:10mm; }
+  *{ box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body{ font-family:Arial,Helvetica,sans-serif; color:#1B2A5B; margin:0; font-size:12px; background:#fff; }
+  .barra{ position:sticky; top:0; background:#FFF8E1; border-bottom:1px solid #E4D3A0; padding:.6rem 1rem; display:flex; justify-content:space-between; align-items:center; gap:1rem; font-size:13px; }
+  .barra button{ background:#C9A227; color:#1B2A5B; border:0; border-radius:6px; padding:.5rem 1rem; font-weight:bold; cursor:pointer; }
+  .pag{ max-width:980px; margin:0 auto; padding:0 1rem 1rem; }
+  .cab{ border-bottom:3px solid #1B2A5B; padding:.6rem 0 .5rem; margin-bottom:.8rem; display:flex; justify-content:space-between; align-items:flex-end; gap:1rem; }
+  .cab h1{ font-family:Georgia,serif; font-size:1.35rem; margin:0; }
+  .cab .sub{ color:#5B6373; font-size:11px; }
+  h2{ font-family:Georgia,serif; font-size:1.05rem; margin:1rem 0 .3rem; padding-bottom:.2rem; border-bottom:2px solid #C9A227; }
+  h3{ font-family:Georgia,serif; font-size:1rem; margin:.9rem 0 .3rem; border-bottom:1px solid #C9A227; }
+  h4{ margin:.6rem 0 .2rem; font-size:.9rem; color:#8A6D00; text-transform:uppercase; letter-spacing:.04em; }
+  table{ width:100%; border-collapse:collapse; margin:.2rem 0 .5rem; }
+  th,td{ border:1px solid #C9D3E8; padding:.28rem .45rem; text-align:left; vertical-align:top; }
+  th{ background:#EEF3FC; font-size:11px; }
+  tr{ break-inside:avoid; page-break-inside:avoid; }
+  thead{ display:table-header-group; }
+  .n{ text-align:right; white-space:nowrap; }
+  .peq{ font-size:10.5px; color:#444; }
+  .chk{ width:62px; text-align:center; }
+  .cx{ display:inline-block; width:15px; height:15px; border:1.6px solid #1B2A5B; border-radius:2px; }
+  .tag{ background:#E9F3EE; color:#2E7D5B; border-radius:999px; padding:0 .4rem; font-size:10px; }
+  .vazio{ color:#8A93A8; font-style:italic; margin:.2rem 0; }
+  .ficha{ break-before:page; page-break-before:always; }
+  .fh{ background:#1B2A5B; color:#fff; padding:.6rem .8rem; border-radius:6px 6px 0 0; }
+  .fh1{ font-family:Georgia,serif; font-size:1.3rem; font-weight:bold; }
+  .fh2{ font-size:12px; opacity:.9; margin-top:.15rem; }
+  .grade{ display:grid; grid-template-columns:repeat(3,1fr); gap:0; border:1px solid #C9D3E8; border-top:0; margin-bottom:.6rem; }
+  .grade div{ padding:.35rem .55rem; border-right:1px solid #E2E8F5; border-bottom:1px solid #E2E8F5; }
+  .grade span{ display:block; font-size:9.5px; color:#8A93A8; text-transform:uppercase; letter-spacing:.04em; }
+  .obs{ background:#FFF8E1; border:1px solid #E4D3A0; border-left:5px solid #C9A227; padding:.5rem .7rem; margin:.5rem 0; white-space:pre-wrap; }
+  .srv{ margin:.1rem 0 .4rem 1.1rem; padding:0; }
+  .assina{ margin-top:1.2rem; display:grid; gap:.9rem; font-size:12px; }
+  .rodape{ color:#8A93A8; font-size:10px; border-top:1px solid #D8E1F5; padding-top:.4rem; margin-top:1rem; }
+  @media print{ .barra{ display:none !important; } }
+</style></head><body>
+<div class="barra"><span>Pronto para imprimir. Escolha <strong>Salvar como PDF</strong> ou a impressora e mantenha <strong>Gráficos de fundo</strong> marcado.</span><button onclick="window.print()">Imprimir</button></div>
+<div class="pag">
+<div class="cab"><div><h1>${esc(titulo)}</h1><div class="sub">Clube Sírio — Alimentos e Bebidas · ${evs.length} evento(s) · ${totConv} convidado(s) no dia</div></div><div class="sub">Gerado em ${esc(agora)}${quem?' por '+esc(quem):''}</div></div>
+<h2>Agenda do dia</h2>${agenda}
+<h2>Produção consolidada — Cozinha</h2>${tabCons('Cozinha')}
+<h2>Produção consolidada — Bar</h2>${tabCons('Bar')}
+<div class="rodape">Cozinha e Bar são separados automaticamente pelo cadastro da Ficha Técnica (itens "bebidas" vão para o Bar) e pelo nome do item; confira os que não forem do cadastro. Quantidades conforme a solicitação aprovada.</div>
+${fichas}
+<div class="rodape">Workflow de Eventos A&amp;B · relatório do dia ${esc(fmtDataBR(iso))}</div>
+</div></body></html>`;
+}
+function exportarRelatorioDia(){
+  const iso = (document.getElementById('exec-rel-dia')||{}).value || execHojeIso();
+  const html = _comMemoProdutos(function(){ return montarRelatorioDia(iso); });
+  if(!html){ showToast('Nenhum evento aprovado ou em execução em ' + fmtDataBR(iso)); return; }
+  let win = null;
+  try{ win = window.open('', '_blank'); }catch(e){ win = null; }
+  if(win && win.document){
+    win.document.open(); win.document.write(html); win.document.close();
+    setTimeout(()=>{ try{ win.focus(); win.print(); }catch(e){} }, 600);
+    showToast('Relatório do dia aberto em nova janela');
+  } else {
+    baixarArquivo('relatorio_operacional_' + iso + '.html', html, 'text/html');
+    showToast('Janela bloqueada pelo navegador — relatório baixado como arquivo');
+  }
+}
+document.getElementById('exec-rel-btn').addEventListener('click', exportarRelatorioDia);
+
 let produtoDatalistBuilt = false;
 function ensureProdutoDatalist(){
   if(produtoDatalistBuilt) return;
@@ -9061,13 +9315,29 @@ function custoProdutoRealizado(nome){
   }
   return _custoProdutoRealizado(nome);
 }
+/* Índices da Ficha Técnica por nome e por nome normalizado, montados uma vez por carga de dados.
+   Antes, cada consulta de custo varria a ficha inteira normalizando todos os nomes, e a tela de
+   execução fazia isso para cada produto de cada evento. */
+let _fichaMapa = null;
+function _fichaMapas(){
+  if(!_fichaMapa || _fichaMapa.ref !== FICHA_TECNICA || _fichaMapa.n !== FICHA_TECNICA.length){
+    const porNome = new Map(), porNorm = new Map();
+    FICHA_TECNICA.forEach(function(p){
+      if(!porNome.has(p.nome)) porNome.set(p.nome, p);
+      const k = normNome(p.nome); if(!porNorm.has(k)) porNorm.set(k, p);
+    });
+    _fichaMapa = { ref:FICHA_TECNICA, n:FICHA_TECNICA.length, porNome:porNome, porNorm:porNorm };
+  }
+  return _fichaMapa;
+}
 function _custoProdutoRealizado(nome){
   if(!nome) return 0;
-  const f = FICHA_TECNICA.find(p=>p.nome === nome);
+  const mp = _fichaMapas();
+  const f = mp.porNome.get(nome);
   if(f && f.porCrianca) return f.porCrianca;
   if(f && f.subtotal) return f.subtotal;
   const alvo = normNome(nome);
-  const f2 = FICHA_TECNICA.find(p=>normNome(p.nome) === alvo);
+  const f2 = mp.porNorm.get(alvo);
   if(f2 && f2.porCrianca) return f2.porCrianca;
   if(f2 && f2.subtotal) return f2.subtotal;
   const f3 = FICHA_TECNICA.find(p=>p.subtotal > 0 && mesmasPalavras(p.nome, nome));
