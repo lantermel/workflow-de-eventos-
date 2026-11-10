@@ -407,6 +407,23 @@
 .exec-chip.alerta b{background:#FBEEEE;color:#B23A3A;}
 .exec-dia{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;margin:1.1rem 0 .3rem;padding:0 .2rem .25rem;border-bottom:2px solid var(--gold);font-family:Georgia,serif;color:var(--navy);font-size:1.02rem;font-weight:bold;}
 .exec-dia span{font-family:Arial,Helvetica,sans-serif;font-weight:normal;font-size:.76rem;color:var(--gray);}
+.graf-h2{font-family:Georgia,serif;color:var(--navy);font-size:1.15rem;margin:1.4rem 0 .5rem;padding-bottom:.25rem;border-bottom:2px solid var(--gold);}
+.graf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:1rem;}
+.graf-box{border:1px solid var(--border);border-radius:8px;padding:.8rem .9rem;background:#fff;min-width:0;}
+.graf-box h3{margin:0 0 .3rem;font-family:Georgia,serif;font-size:.98rem;color:var(--navy);}
+.graf-dica{font-size:.76rem;color:var(--gray);margin:-.1rem 0 .4rem;}
+.graf-svg{width:100%;height:auto;display:block;}
+.graf-vazio{color:var(--gray);font-style:italic;font-size:.85rem;padding:1.2rem 0;text-align:center;}
+.graf-pz{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;}
+.graf-pizza{width:190px;height:190px;flex:0 0 auto;}
+.graf-leg{list-style:none;margin:0;padding:0;flex:1;min-width:170px;font-size:.8rem;}
+.graf-leg li{display:grid;grid-template-columns:12px 1fr auto 46px;gap:.45rem;align-items:center;padding:.18rem 0;border-bottom:1px dashed #E2E8F5;}
+.graf-leg i,.graf-leg2 i{display:inline-block;width:11px;height:11px;border-radius:2px;}
+.graf-leg .r{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .graf-leg .v{text-align:right;color:var(--navy);font-weight:bold;} .graf-leg .p{text-align:right;color:var(--gray);}
+.graf-leg2{display:flex;gap:.9rem;flex-wrap:wrap;font-size:.78rem;margin-bottom:.2rem;} .graf-leg2 span{display:inline-flex;gap:.3rem;align-items:center;}
+.graf-rank{display:grid;gap:.3rem;} .graf-rk{display:grid;grid-template-columns:minmax(120px,38%) 1fr auto;gap:.5rem;align-items:center;font-size:.8rem;}
+.graf-rk .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .graf-rk .b{background:#EEF3FC;border-radius:4px;height:14px;display:block;overflow:hidden;} .graf-rk .b i{display:block;height:100%;border-radius:4px;}
+.graf-rk .v{font-weight:bold;color:var(--navy);}
 </style>
 <style id="layout-2niveis">
 /* ===== LAYOUT DE DOIS NÍVEIS: grupos no topo + submenus na lateral ===== */
@@ -939,6 +956,7 @@
       <button class="tab-btn" data-tab="relatorio" data-grupo="analise">Relatório</button>
       <button class="tab-btn" data-tab="indicadores" data-grupo="analise">Indicadores</button>
       <button class="tab-btn" data-tab="cmv" data-grupo="analise">CMV</button>
+      <button class="tab-btn" data-tab="graficos" data-grupo="analise">Gráficos</button>
       <span class="tab-grupo" data-grupo-label="cadastro">Cadastros</span>
       <button class="tab-btn" data-tab="produtos" data-grupo="cadastro">Produtos</button>
       <button class="tab-btn" data-tab="fichatecnica" data-grupo="cadastro">Ficha Técnica</button>
@@ -1897,6 +1915,15 @@ teresa cristina - teresa.cristina@sirio.org.br"></textarea>
     </div>
 
     <!-- ============ TAB: INDICADORES ============ -->
+    <div class="panel" id="panel-graficos">
+      <div class="card">
+        <h2>Gráficos — indicadores do mês</h2>
+        <p class="subtle">Receita, mão de obra, CMV, eventos e fechamento mensal em gráficos de pizza e de barras. Passe o mouse sobre uma barra ou fatia para ver o valor exato.</p>
+        <div class="row3" style="align-items:end;"><div><label>Mês</label><select id="graf-mes"></select></div><div></div><div></div></div>
+      </div>
+      <div id="graf-conteudo"></div>
+    </div>
+
     <div class="panel" id="panel-cmv">
       <p class="subtle">CMV teórico: custo de receita (Ficha Técnica) dividido pelo preço de venda (catálogo de Produtos). Recalcula sozinho sempre que a ficha técnica ou os preços mudam — não depende de lançamento mensal. Para produtos ainda sem vínculo de preço confirmado, revise as sugestões abaixo ou vincule manualmente.</p>
 
@@ -3136,6 +3163,7 @@ const TAB_ACESSO = {
   relatorio:    ['aprovador1','aprovador2','solicitante','acompanhamento'],
   indicadores:  ['aprovador1','aprovador2','acompanhamento'],
   cmv:          ['aprovador1','aprovador2'],
+  graficos:     ['aprovador1','aprovador2','acompanhamento'],
   produtos:     [],
   fichatecnica: [],
   insumos:      ['insumos'],
@@ -6445,6 +6473,254 @@ function execBlocoCardapio(s){
   let deb = null;
   document.getElementById('req-busca').addEventListener('input', function(){ clearTimeout(deb); const v = this.value; deb = setTimeout(()=>{ REQ_UI.busca = v; renderRequisicao(); }, 200); });
   document.getElementById('panel-requisicao').addEventListener('focusin', reqGarantirDatalist, { once:true });
+})();
+
+/* ============ GRÁFICOS (pizza e barras) ============
+   Gráficos em SVG puro, sem biblioteca externa. Os números são os mesmos do Resultado diário:
+   receita, eventos a cobrar, mão de obra, CMV, folha e despesas gerais do mês, até o último dia lançado. */
+const GRAF_CORES = ['#1B2A5B','#C9A227','#2E7D5B','#C0392B','#1B5FA8','#8E5BB5','#E67E22','#16A085','#7F8C8D','#D35490'];
+const GRAF_UI = { ym:'' };
+function grafEsc(x){ return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function grafAbrev(v){
+  const a = Math.abs(v), s = v < 0 ? '-' : '';
+  if(a >= 1e6) return s + (a/1e6).toLocaleString('pt-BR',{maximumFractionDigits:1}) + ' mi';
+  if(a >= 1e3) return s + (a/1e3).toLocaleString('pt-BR',{maximumFractionDigits:a>=1e4?0:1}) + ' mil';
+  return s + Math.round(a).toLocaleString('pt-BR');
+}
+function grafPizza(dados, o){
+  o = o || {}; const fmt = o.fmt || fmtBRL2;
+  let d = dados.filter(x=>x.valor > 0).map(x=>Object.assign({}, x)).sort((a,b)=>b.valor - a.valor);
+  if(!d.length) return '<div class="graf-vazio">Sem dados para este período.</div>';
+  if(d.length > 8){ const resto = d.slice(7).reduce((a,x)=>a+x.valor,0); d = d.slice(0,7).concat([{ rotulo:'Outros', valor:resto }]); }
+  const tot = d.reduce((a,x)=>a+x.valor,0), R = 92, r = 56, cx = 100, cy = 100;
+  const pt = (a,rad)=>[ (cx + rad*Math.cos(a)).toFixed(2), (cy + rad*Math.sin(a)).toFixed(2) ];
+  let ang = -Math.PI/2, paths = '';
+  d.forEach((x,i)=>{
+    x.cor = x.cor || GRAF_CORES[i % GRAF_CORES.length];
+    const f = x.valor / tot, tip = '<title>' + grafEsc(x.rotulo) + ': ' + grafEsc(fmt(x.valor)) + ' (' + (f*100).toFixed(1) + '%)</title>';
+    if(f >= 0.9999){ paths += '<circle cx="'+cx+'" cy="'+cy+'" r="'+((R+r)/2)+'" fill="none" stroke="'+x.cor+'" stroke-width="'+(R-r)+'">'+tip+'</circle>'; return; }
+    const a2 = ang + f*2*Math.PI, lg = f > 0.5 ? 1 : 0;
+    const p1 = pt(ang,R), p2 = pt(a2,R), p3 = pt(a2,r), p4 = pt(ang,r);
+    paths += '<path d="M'+p1[0]+' '+p1[1]+' A'+R+' '+R+' 0 '+lg+' 1 '+p2[0]+' '+p2[1]+' L'+p3[0]+' '+p3[1]+' A'+r+' '+r+' 0 '+lg+' 0 '+p4[0]+' '+p4[1]+' Z" fill="'+x.cor+'" stroke="#fff" stroke-width="1.5">'+tip+'</path>';
+    ang = a2;
+  });
+  const centro = (o.centro != null) ? o.centro : grafAbrev(tot);
+  const svg = '<svg viewBox="0 0 200 200" class="graf-pizza" role="img"><g>' + paths + '</g>' +
+    '<text x="100" y="97" text-anchor="middle" font-size="15" font-weight="bold" fill="#1B2A5B" font-family="Georgia,serif">' + grafEsc(centro) + '</text>' +
+    '<text x="100" y="114" text-anchor="middle" font-size="9" fill="#8A93A8">' + grafEsc(o.legendaCentro || 'total') + '</text></svg>';
+  const leg = '<ul class="graf-leg">' + d.map(x=>'<li><i style="background:'+x.cor+'"></i><span class="r">'+grafEsc(x.rotulo)+'</span><span class="v">'+grafEsc(fmt(x.valor))+'</span><span class="p">'+(x.valor/tot*100).toFixed(1)+'%</span></li>').join('') + '</ul>';
+  return '<div class="graf-pz">' + svg + leg + '</div>';
+}
+function grafPasso(x){
+  const p = Math.pow(10, Math.floor(Math.log10(x))), f = x / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+function grafBarras(cats, series, o){
+  o = o || {};
+  const W = 760, H = o.altura || 260, padL = 56, padR = 10, padT = 12, padB = 30;
+  const fmt = o.fmt || fmtBRL2, emp = !!o.empilhado;
+  let max = 0, min = 0;
+  cats.forEach((c,i)=>{
+    if(emp){ let pos = 0, neg = 0; series.forEach(s=>{ const v = s.valores[i]||0; if(v >= 0) pos += v; else neg += v; }); max = Math.max(max,pos); min = Math.min(min,neg); }
+    else series.forEach(s=>{ const v = s.valores[i]||0; max = Math.max(max,v); min = Math.min(min,v); });
+  });
+  if(max === 0 && min === 0) return '<div class="graf-vazio">Sem dados para este período.</div>';
+  const passo = grafPasso((max - min) / 4 || 1);
+  const yMax = Math.ceil(max / passo) * passo, yMin = Math.floor(min / passo) * passo;
+  const Y = v => padT + (H - padT - padB) * (yMax - v) / (yMax - yMin);
+  let g = '';
+  for(let v = yMin; v <= yMax + passo/2; v += passo){
+    g += '<line x1="'+padL+'" x2="'+(W-padR)+'" y1="'+Y(v).toFixed(1)+'" y2="'+Y(v).toFixed(1)+'" stroke="'+(Math.abs(v)<1e-9?'#8A93A8':'#E2E8F5')+'"/>' +
+         '<text x="'+(padL-6)+'" y="'+(Y(v)+3).toFixed(1)+'" text-anchor="end" font-size="10" fill="#5B6373">'+grafAbrev(v)+'</text>';
+  }
+  const gw = (W - padL - padR) / cats.length, n = series.length;
+  const bw = emp ? gw*0.62 : Math.min(40, gw*0.74 / n), pulo = Math.max(1, Math.ceil(cats.length / 16));
+  cats.forEach((c,i)=>{
+    const x0 = padL + gw*i + gw/2;
+    let pos = 0, neg = 0;
+    series.forEach((s,k)=>{
+      const v = s.valores[i]||0; if(!v) return;
+      const cor = (o.coresCat && n === 1) ? o.coresCat[i] : s.cor;
+      let xb, yTop, yBase;
+      if(emp){ xb = x0 - bw/2; if(v >= 0){ yBase = Y(pos); pos += v; yTop = Y(pos); } else { yTop = Y(neg); neg += v; yBase = Y(neg); } }
+      else { xb = x0 - (n*bw)/2 + k*bw; yTop = Y(Math.max(v,0)); yBase = Y(Math.min(v,0)); }
+      g += '<rect x="'+xb.toFixed(1)+'" y="'+Math.min(yTop,yBase).toFixed(1)+'" width="'+(bw-1).toFixed(1)+'" height="'+Math.max(1,Math.abs(yBase-yTop)).toFixed(1)+'" fill="'+cor+'" rx="1.5"><title>'+grafEsc(c)+' — '+grafEsc(s.nome)+': '+grafEsc(fmt(v))+'</title></rect>';
+    });
+    if(i % pulo === 0) g += '<text x="'+x0.toFixed(1)+'" y="'+(H-padB+14)+'" text-anchor="middle" font-size="10" fill="#5B6373">'+grafEsc(c)+'</text>';
+  });
+  const leg = (n > 1) ? '<div class="graf-leg2">' + series.map(s=>'<span><i style="background:'+s.cor+'"></i>'+grafEsc(s.nome)+'</span>').join('') + '</div>' : '';
+  return leg + '<svg viewBox="0 0 '+W+' '+H+'" class="graf-svg" role="img">' + g + '</svg>';
+}
+function grafRanking(dados, o){
+  o = o || {}; const fmt = o.fmt || fmtBRL2;
+  const d = dados.filter(x=>x.valor > 0).sort((a,b)=>b.valor - a.valor).slice(0, o.max || 8);
+  if(!d.length) return '<div class="graf-vazio">Sem dados para este período.</div>';
+  const max = d[0].valor;
+  return '<div class="graf-rank">' + d.map((x,i)=>'<div class="graf-rk"><span class="n" title="'+grafEsc(x.rotulo)+'">'+grafEsc(x.rotulo)+'</span><span class="b"><i style="width:'+(x.valor/max*100).toFixed(1)+'%;background:'+GRAF_CORES[i%GRAF_CORES.length]+'"></i></span><span class="v">'+grafEsc(fmt(x.valor))+'</span></div>').join('') + '</div>';
+}
+
+/* ---------- dados ---------- */
+function grafMeses(){
+  const hoje = new Date(), ymHoje = hoje.getFullYear() + '-' + String(hoje.getMonth()+1).padStart(2,'0');
+  const s = new Set(['2026-07','2026-08','2026-09']);
+  mesMesesParaCarregar().forEach(m=>{ if(m <= ymHoje) s.add(m); });
+  return [...s].sort();
+}
+function grafQuadro(ym){
+  try{
+    if(ym === '2026-07') return julMontarQuadro().map((l,i)=>({ dia:l.diaNum||i+1, receita:l.recTotal||0, evento:0, cmv:l.alValor||0, mo:l.moValor||0, folha:l.foValor||0, gerais:l.geValor||0, resultado:l.resultado||0 }));
+    if(ym === '2026-08') return agoMontarQuadro().map(l=>({ dia:l.dia, receita:l.receita||0, evento:0, cmv:l.cmv||0, mo:l.moValor||0, folha:l.folha||0, gerais:l.gerais||0, resultado:l.resultado||0 }));
+    if(ym === '2026-09') return setMontarQuadro().map(l=>({ dia:l.dia, receita:l.receita||0, evento:l.evento||0, cmv:l.cmv||0, mo:l.moValor||0, folha:l.folha||0, gerais:l.gerais||0, resultado:l.resultado||0 }));
+    return mesMontarQuadro(ym).map(l=>({ dia:l.dia, receita:l.receita||0, evento:l.evento||0, cmv:l.cmv||0, mo:l.moValor||0, folha:l.folha||0, gerais:l.gerais||0, resultado:l.resultado||0 }));
+  }catch(e){ console.warn('gráficos: quadro de', ym, e); return []; }
+}
+/* Mesmos critérios do Resultado diário: valores até o último dia com receita (ou ponto) lançado;
+   eventos a cobrar = soma de "Total previsto" do Relatório (mês corrente: até ontem). Jul e ago: mês fechado. */
+function grafResumo(ym){
+  const q = grafQuadro(ym); if(!q.length) return null;
+  const nDias = q.length;
+  const ultRec = q.reduce((m,l)=>l.receita > 0 ? Math.max(m,l.dia) : m, 0);
+  const ultMO = q.reduce((m,l)=>l.mo > 0 ? Math.max(m,l.dia) : m, 0);
+  const corte = (ym === '2026-07' || ym === '2026-08') ? nDias : (ultRec || ultMO);
+  const T = c => q.filter(l=>l.dia <= corte).reduce((a,l)=>a + (l[c]||0), 0);
+  let evento = T('evento'), resultado = T('resultado'), nEv = 0;
+  if(ym >= MES_PRIMEIRA){
+    const hj = new Date(), ymHoje = hj.getFullYear() + '-' + String(hj.getMonth()+1).padStart(2,'0');
+    const ate = (ym === ymHoje) ? hj.getDate() - 1 : mesDias(ym);
+    const ev = ate >= 1 ? somaTotalPrevistoMes(ym, ate) : { total:0, n:0 };
+    resultado = resultado - evento + ev.total; evento = ev.total; nEv = ev.n;
+  }
+  const receita = T('receita'), mo = T('mo'), cmv = T('cmv'), folha = T('folha'), gerais = T('gerais');
+  return { ym, rotulo:mesRotulo(ym), q, corte, nDias, receita, evento, mo, cmv, folha, gerais, custos: mo + cmv + folha + gerais, resultado, nEv,
+           temDados: receita > 0 || mo > 0 || evento > 0 };
+}
+function grafReceitaPdv(ym){
+  let o = null;
+  if(ym >= MES_PRIMEIRA) o = mesDadosDe(ym).receitaPdv;
+  else if(ym === '2026-09') o = (typeof SET_RECEITA_PDV !== 'undefined') ? SET_RECEITA_PDV : null;
+  else if(ym === '2026-07'){ o = {}; JUL_VENDAS.forEach(r=>{ o[r.destino] = (o[r.destino]||0) + (r.valor||0); }); }
+  if(!o) return null;
+  const arr = Array.isArray(o) ? o : Object.keys(o).map(k=>[k, o[k]]);
+  const out = arr.map(x=>({ rotulo:String(x[0]), valor:+x[1] || 0 })).filter(x=>x.valor > 0);
+  return out.length ? out : null;
+}
+function grafMoSetor(ym){
+  if(ym < MES_PRIMEIRA && ym !== '2026-09') return null;
+  const real = {}, diasReal = new Set(), plan = {};
+  MO_REGISTROS.forEach(r=>{
+    const d = String(r.data||''); if(!d.startsWith(ym) || moForaDoPerimetro(r.setor)) return;
+    diasReal.add(d.slice(8,10)); real[r.setor] = (real[r.setor]||0) + buscarCustoTurno(r.setor, r.funcao, r.turno || '8H');
+  });
+  PLANEJAMENTO.forEach(p=>{
+    const d = String(p.data||''); if(!d.startsWith(ym) || moForaDoPerimetro(p.setor) || diasReal.has(d.slice(8,10))) return;
+    const qtd = parseInt(p.quantidade,10) || 0; let v = parseFloat(p.valor) || 0;
+    if(v <= 0 && qtd > 0) v = qtd * buscarCustoTurno(p.setor, p.funcao, p.turno || '8H');
+    plan[p.setor] = (plan[p.setor]||0) + v;
+  });
+  const m = Object.assign({}, real); Object.keys(plan).forEach(k=>{ m[k] = (m[k]||0) + plan[k]; });
+  const out = Object.keys(m).map(k=>({ rotulo:k, valor:m[k] })).filter(x=>x.valor > 0);
+  return out.length ? out : null;
+}
+function grafEventos(ym){
+  const evs = SOLICITACOES.filter(s=>String(s.data||'').startsWith(ym) && s.status !== 'Cancelado');
+  const porStatus = {}, porDepto = {}, lista = [];
+  const dias = {}; let nDias = mesDias(ym);
+  evs.forEach(s=>{ porStatus[s.status] = (porStatus[s.status]||0) + 1; });
+  evs.filter(eventoContaNoPrevisto).forEach(s=>{
+    const v = eventoTotalPrevisto(s), dep = String(s.departamento||'').trim() || 'Sem departamento';
+    porDepto[dep] = (porDepto[dep]||0) + v;
+    const dia = parseInt(String(s.data).slice(8,10),10); dias[dia] = (dias[dia]||0) + v;
+    lista.push({ rotulo:(s.nome||'(sem nome)') + ' — ' + (fmtDataBR(s.data)||''), valor:v });
+  });
+  return { n:evs.length, porStatus:Object.keys(porStatus).map(k=>({ rotulo:k, valor:porStatus[k] })),
+           porDepto:Object.keys(porDepto).map(k=>({ rotulo:k, valor:porDepto[k] })),
+           porDia:Array.from({length:nDias}, (_,i)=>dias[i+1]||0), lista };
+}
+const GRAF_COR_STATUS = { 'Aprovado':'#2E7D5B', 'Em Execução':'#1B5FA8', 'Concluído':'#1B2A5B', 'Em orçamento':'#C9A227', 'Em requisição':'#E67E22',
+  'Aguardando solicitante':'#8E5BB5', 'Ajuste solicitado':'#D35490', 'Pendente Aprovador 1':'#16A085', 'Pendente Aprovador 2':'#16A085', 'Rejeitado':'#C0392B' };
+
+/* ---------- tela ---------- */
+function renderGraficos(){
+  const box = document.getElementById('graf-conteudo'); if(!box) return;
+  const meses = grafMeses();
+  const sel = document.getElementById('graf-mes');
+  if(!GRAF_UI.ym || meses.indexOf(GRAF_UI.ym) < 0){
+    const hj = new Date(), ymHoje = hj.getFullYear() + '-' + String(hj.getMonth()+1).padStart(2,'0');
+    GRAF_UI.ym = meses.indexOf(ymHoje) >= 0 ? ymHoje : meses[meses.length-1];
+  }
+  if(sel) sel.innerHTML = meses.slice().reverse().map(m=>'<option value="'+m+'"'+(m===GRAF_UI.ym?' selected':'')+'>'+mesRotulo(m)+'</option>').join('');
+  const ym = GRAF_UI.ym, R = grafResumo(ym);
+  if(!R || !R.temDados){ box.innerHTML = '<div class="empty" style="display:block;">Ainda não há dados lançados para ' + mesRotulo(ym) + '. Anexe a receita, o CMV, a folha e as despesas gerais em Análise / Indicadores.</div>'; return; }
+  const kpi = (l,v,c)=>'<div class="jul-kpi"><span class="lab">'+l+'</span><span class="val"'+(c?' style="color:'+c+'"':'')+'>'+v+'</span></div>';
+  const receitaTotal = R.receita + R.evento;
+  const pct = (a,b)=>b > 0 ? (a/b*100).toFixed(1) + '%' : '—';
+  const dia = d => String(d).padStart(2,'0');
+  const cats = R.q.map(l=>dia(l.dia));
+  const emCorte = R.q.map(l=>l.dia <= R.corte);
+  const box2 = (titulo, corpo, dica)=>'<div class="graf-box"><h3>'+titulo+'</h3>'+(dica?'<div class="graf-dica">'+dica+'</div>':'')+corpo+'</div>';
+  let h = '';
+  h += '<div class="jul-kpis">' +
+    kpi('Receita', fmtBRL(R.receita), 'var(--green)') + kpi('Eventos a cobrar', fmtBRL(R.evento), 'var(--green)') +
+    kpi('Mão de obra', fmtBRL(R.mo)) + kpi('CMV', fmtBRL(R.cmv), 'var(--red)') + kpi('Folha CLT', fmtBRL(R.folha)) + kpi('Gerais', fmtBRL(R.gerais)) +
+    kpi('Resultado', fmtBRL(R.resultado), R.resultado >= 0 ? 'var(--green)' : 'var(--red)') + '</div>' +
+    '<div class="note" style="margin-bottom:1rem;">Valores de <strong>' + mesRotulo(ym) + '</strong> até o dia <strong>' + dia(R.corte) + '</strong> (último dia com lançamento), pelos mesmos critérios do Resultado diário. ' +
+    'Eventos a cobrar = soma de "Total previsto" do Relatório' + (R.nEv ? ' (' + R.nEv + ' evento(s))' : '') + '.</div>';
+
+  // ---- Fechamento ----
+  h += '<h2 class="graf-h2">Fechamento do mês</h2><div class="graf-grid">' +
+    box2('Receitas, custos e resultado', grafBarras(['Receita','Eventos','M.O.','CMV','Folha','Gerais','Resultado'],
+      [{ nome:'Valor', cor:'#1B2A5B', valores:[R.receita, R.evento, R.mo, R.cmv, R.folha, R.gerais, R.resultado] }],
+      { coresCat:['#2E7D5B','#2E7D5B','#E67E22','#C0392B','#8E5BB5','#7F8C8D', R.resultado >= 0 ? '#1B5FA8' : '#C0392B'], altura:280 })) +
+    box2('Composição dos custos', grafPizza([{rotulo:'Mão de obra',valor:R.mo,cor:'#E67E22'},{rotulo:'CMV',valor:R.cmv,cor:'#C0392B'},{rotulo:'Folha CLT',valor:R.folha,cor:'#8E5BB5'},{rotulo:'Despesas gerais',valor:R.gerais,cor:'#7F8C8D'}], { legendaCentro:'custos' }),
+      'Custos de ' + fmtBRL(R.custos) + ' = ' + pct(R.custos, receitaTotal) + ' da receita + eventos.') +
+    box2('Para onde vai cada real recebido', grafPizza([{rotulo:'Mão de obra',valor:R.mo,cor:'#E67E22'},{rotulo:'CMV',valor:R.cmv,cor:'#C0392B'},{rotulo:'Folha CLT',valor:R.folha,cor:'#8E5BB5'},{rotulo:'Despesas gerais',valor:R.gerais,cor:'#7F8C8D'},{rotulo:'Resultado (sobra)',valor:Math.max(R.resultado,0),cor:'#2E7D5B'}], { legendaCentro:'receita + eventos', centro:grafAbrev(receitaTotal) }),
+      R.resultado < 0 ? 'Os custos superam a receita + eventos: não há sobra no período.' : '') +
+    box2('Resultado por dia', grafBarras(cats, [{ nome:'Resultado', cor:'#1B5FA8', valores:R.q.map((l,i)=>emCorte[i] ? l.resultado : 0) }],
+      { coresCat:R.q.map(l=>l.resultado >= 0 ? '#2E7D5B' : '#C0392B') }), 'Resultado diário (receita + eventos − M.O. − CMV − folha − gerais), do dia 01 ao ' + dia(R.corte) + '.') +
+    '</div>';
+
+  // ---- Receita ----
+  const pdv = grafReceitaPdv(ym);
+  h += '<h2 class="graf-h2">Receita</h2><div class="graf-grid">' +
+    box2('Receita por ponto de venda', pdv ? grafPizza(pdv, { legendaCentro:'receita' }) : '<div class="graf-vazio">Sem detalhe por ponto de venda neste mês.</div>') +
+    box2('Receita por dia', grafBarras(cats, [{ nome:'Receita', cor:'#2E7D5B', valores:R.q.map(l=>l.receita) }])) + '</div>';
+
+  // ---- Mão de obra ----
+  const moS = grafMoSetor(ym);
+  h += '<h2 class="graf-h2">Mão de obra</h2><div class="graf-grid">' +
+    box2('Mão de obra por setor', moS ? grafPizza(moS, { legendaCentro:'M.O.' }) : '<div class="graf-vazio">Sem detalhe por setor neste mês.</div>', 'M.O. cooperada = ' + pct(R.mo, R.receita) + ' da receita no período.') +
+    box2('Mão de obra por dia', grafBarras(cats, [{ nome:'M.O.', cor:'#E67E22', valores:R.q.map(l=>l.mo) }])) + '</div>';
+
+  // ---- CMV ----
+  h += '<h2 class="graf-h2">CMV</h2><div class="graf-grid">' +
+    box2('CMV por dia', grafBarras(cats, [{ nome:'CMV', cor:'#C0392B', valores:R.q.map(l=>l.cmv) }]), 'CMV = ' + pct(R.cmv, R.receita) + ' da receita no período.') +
+    box2('Receita × CMV', grafBarras(cats, [{ nome:'Receita', cor:'#2E7D5B', valores:R.q.map(l=>l.receita) },{ nome:'CMV', cor:'#C0392B', valores:R.q.map(l=>l.cmv) }])) + '</div>';
+
+  // ---- Eventos ----
+  const E = grafEventos(ym);
+  h += '<h2 class="graf-h2">Eventos</h2><div class="graf-grid">' +
+    box2('Eventos por situação', grafPizza(E.porStatus.map(x=>({ rotulo:x.rotulo, valor:x.valor, cor:GRAF_COR_STATUS[x.rotulo] })), { fmt:n=>n+' evento(s)', centro:String(E.n), legendaCentro:'eventos' })) +
+    box2('Valor previsto por departamento', grafPizza(E.porDepto, { legendaCentro:'previsto' }), 'Sem rejeitados e cancelados.') +
+    box2('Valor previsto de eventos por dia', grafBarras(cats, [{ nome:'Eventos', cor:'#1B5FA8', valores:E.porDia }])) +
+    box2('Maiores eventos do mês', grafRanking(E.lista, { max:8 })) + '</div>';
+
+  // ---- Comparativo ----
+  const todos = meses.map(grafResumo).filter(r=>r && r.temDados);
+  h += '<h2 class="graf-h2">Comparativo mensal</h2><div class="graf-grid">' +
+    box2('Receita, custos e resultado por mês', todos.length > 1 ? grafBarras(todos.map(r=>r.rotulo), [
+      { nome:'Receita + eventos', cor:'#2E7D5B', valores:todos.map(r=>r.receita + r.evento) },
+      { nome:'Custos', cor:'#C0392B', valores:todos.map(r=>r.custos) },
+      { nome:'Resultado', cor:'#1B5FA8', valores:todos.map(r=>r.resultado) }], { altura:280 }) : '<div class="graf-vazio">Precisa de pelo menos dois meses com dados.</div>',
+      'Meses abertos mostram o parcial até o último dia lançado; jul e ago são meses fechados.') +
+    box2('Composição dos custos por mês', todos.length > 1 ? grafBarras(todos.map(r=>r.rotulo), [
+      { nome:'M.O.', cor:'#E67E22', valores:todos.map(r=>r.mo) }, { nome:'CMV', cor:'#C0392B', valores:todos.map(r=>r.cmv) },
+      { nome:'Folha', cor:'#8E5BB5', valores:todos.map(r=>r.folha) }, { nome:'Gerais', cor:'#7F8C8D', valores:todos.map(r=>r.gerais) }], { empilhado:true, altura:280 }) : '<div class="graf-vazio">Precisa de pelo menos dois meses com dados.</div>') +
+    '</div>';
+  box.innerHTML = h;
+}
+(function(){
+  const s = document.getElementById('graf-mes'); if(!s) return;
+  s.addEventListener('change', function(){ GRAF_UI.ym = this.value; renderGraficos(); });
 })();
 
 /* ============ EVENTOS RECORRENTES ============
@@ -11969,6 +12245,7 @@ function abrirAba(btn){
       // os eventos só eram lidos no login: a versão enviada por A&B depois disso não aparecia para o solicitante
       recarregarSolicitacoes().then(function(ok){ if(ok){ try{ renderOrcamento(); }catch(e){} } });
     }
+    if(btn.dataset.tab==='graficos'){ try{ renderGraficos(); }catch(e){ console.error('gráficos:', e); } }
     if(btn.dataset.tab==='requisicao'){ renderRequisicao(); recarregarSolicitacoes().then(function(ok){ if(ok){ renderRequisicao(); } }); }
     if(btn.dataset.tab==='notificacoes'){ renderNotificacoes(); recarregarSolicitacoes().then(function(ok){ if(ok){ renderNotificacoes(); atualizarSino(); } }); }
     if(btn.dataset.tab==='desperdicio'){ try{ initDesperdicio(); }catch(e){} }
